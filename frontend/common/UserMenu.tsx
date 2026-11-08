@@ -2,86 +2,46 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { signOut, useSession } from '@/auth/auth-client';
-import { userCan } from '@/auth/permissions';
 import { SelectButton } from '@/common/Button';
-import { PopoverMenu } from '@/common/PopoverMenu';
+import { Popover } from '@/common/Popover';
 import { Text } from '@/common/Text';
 import { SelectButtonTheme } from '@/enums/button';
+import { Role } from '@/enums/auth';
 import { TextVariant } from '@/enums/text';
+import { useMe } from '@/hooks/useMe';
 
-export const UserMenu = ({ version }: { version?: string }) => {
-	const { data } = useSession();
-	const router = useRouter();
-	const [signingOut, setSigningOut] = useState(false);
+const ROLE_LABEL: Record<Role, string> = {
+	[Role.Admin]: 'Data owner',
+	[Role.Editor]: 'Data scientist',
+	[Role.Reader]: 'Read only',
+};
 
-	if (!data) return null;
-
-	const { user } = data;
-	const initial = (user.name || user.email || '?').charAt(0).toUpperCase();
-	const fullName = user.name || user.email;
-	// Title-case the role, e.g. "admin" → "Admin".
-	const roleLabel = user.role
-		? user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase()
-		: null;
-
-	const canManageTokens = userCan(
-		{ id: user.id, role: user.role ?? null },
-		{ apiToken: ['manage'] },
-	);
-
-	const handleSignOut = async () => {
-		setSigningOut(true);
-		await signOut();
-		// Hard navigation so the root layout re-runs server-side without a
-		// session and drops the app shell (NavRail / top bar).
-		window.location.href = '/login';
-	};
+/** Who Hopsworks says is signed in. Signing in and out happens in Hopsworks. */
+export const UserMenu = () => {
+	const { me } = useMe();
+	if (me == null) return null;
 
 	return (
-		<PopoverMenu
-			header={
-				// The fixed width is what gives a long email something to be
-				// clipped against, since the menu is otherwise as wide as its
-				// widest item.
-				<div className="w-56 px-3 py-1 text-xs text-secondary dark:text-zinc-500">
-					{version ? <p>Version {version}</p> : null}
-					<Text text={fullName} variant={TextVariant.Strong} />
-					{roleLabel ? <p className="text-[10px]">{roleLabel}</p> : null}
-				</div>
-			}
-			items={[
-				...(canManageTokens
-					? [
-							{
-								label: 'API Tokens',
-								onClick: () => router.push('/account/api-tokens'),
-							},
-						]
-					: []),
-				{
-					label: signingOut ? 'Signing out…' : 'Sign out',
-					onClick: () => {
-						void handleSignOut();
-					},
-					disabled: signingOut,
-				},
-			]}
+		<Popover
 			trigger={({ open, toggle }) => (
 				<SelectButton
 					theme={SelectButtonTheme.Avatar}
 					onClick={toggle}
-					aria-haspopup="menu"
+					aria-haspopup="dialog"
 					aria-expanded={open}
-					aria-label="User menu"
+					aria-label="Signed-in user"
 				>
-					{initial}
+					{me.username.charAt(0).toUpperCase()}
 				</SelectButton>
 			)}
-		/>
+			panelClassName="w-56 px-3 py-2 text-xs text-secondary dark:text-zinc-500"
+		>
+			{() => (
+				<>
+					<Text text={me.username} variant={TextVariant.Strong} />
+					<p className="text-[10px]">{ROLE_LABEL[me.role] ?? me.role}</p>
+				</>
+			)}
+		</Popover>
 	);
 };

@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';

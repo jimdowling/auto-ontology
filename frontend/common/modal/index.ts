@@ -5,11 +5,6 @@
 export { Modal } from './Modal';
 export { ConfirmModal, type ConfirmModalProps } from './ConfirmModal';
 export {
-	ModalWithSteps,
-	type ModalWithStepsProps,
-	type StepperFooterAction,
-} from './ModalWithSteps';
-export {
 	ModalCreateNewItem,
 	type ModalCreateNewItemProps,
 	type ModalSecondaryAction,

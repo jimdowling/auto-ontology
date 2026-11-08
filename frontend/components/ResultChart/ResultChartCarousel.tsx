@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { type FC, useState } from 'react';
 import { ChevronLeft, ChevronRight } from '@/adapters/ui/icons';
 import { ResultChart } from './ResultChart';

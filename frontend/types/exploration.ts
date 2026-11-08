@@ -4,7 +4,7 @@
 
 import type { TableType } from '@/enums/datasources';
 import type { ExplorationLayer } from '@/enums/exploration';
-import type { Term, TermZone } from '@/types/terms';
+import type { Term } from '@/types/terms';
 
 // The exploration graph does not surface certification, so those Term fields
 // are intentionally omitted from the graph node shape.
@@ -33,7 +33,6 @@ export type ExplorationDataNode = {
 	columnsCount: number;
 	sqlCount: number;
 	termsCount: number;
-	zones: TermZone[];
 };
 
 export type ExplorationNode = ExplorationTermNode | ExplorationDataNode;
@@ -67,16 +66,12 @@ export type ExplorationGraph = {
 	links: ExplorationLink[];
 };
 
-/** Maps a Table or Term id to the Zones it belongs to. */
-export type ExplorationZonesMap = Record<string, TermZone[]>;
-
 /** Server DTO for a semantic (Term) node in the Exploration graph endpoint. */
 export type SemanticGraphNodeDto = {
 	id: string;
 	name: string;
 	description: string | null;
 	synonyms: string[];
-	zones: TermZone[];
 	relationship_count: number;
 	column_attributes_count: number;
 	sql_attributes_count: number;
@@ -96,7 +91,6 @@ export type DataGraphNodeDto = {
 	sql_count: number;
 	terms_count: number;
 	relationship_count: number;
-	zones: TermZone[];
 };
 
 export type RelatedExplorationNodeDto = {

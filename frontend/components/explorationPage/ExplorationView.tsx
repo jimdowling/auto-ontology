@@ -2,11 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import dynamic from 'next/dynamic';
+import { useNavigate, useSearchParams } from 'react-router';
 
 import { datasources } from '@/api/datasources';
 import { explorationApi } from '@/api/exploration';
@@ -46,6 +43,7 @@ import type {
 import { NODE_TYPE_ACCENT_COLOR } from './graph/nodeTypeColors';
 import type { NodeType } from './graph/nodeTypeColors';
 import { ViewToggle } from './graph/ViewToggle';
+import { GraphCanvas } from './graph/GraphCanvas';
 import { ZoomControls } from './graph/ZoomControls';
 import { DatabaseFilter } from './DatabaseFilter';
 import { ActiveExpansionCard } from './ActiveExpansionCard';
@@ -178,17 +176,9 @@ const LegendItem = ({
 	);
 };
 
-// Sigma.js touches WebGL globals at module scope, so it can only be
-// evaluated in the browser; loading it via `next/dynamic` with `ssr: false`
-// keeps Next.js from crashing while server-rendering this client component.
-const GraphCanvas = dynamic(
-	() => import('./graph/GraphCanvas').then((graphCanvasModule) => graphCanvasModule.GraphCanvas),
-	{ ssr: false },
-);
-
 export const ExplorationView = () => {
-	const router = useRouter();
-	const searchParams = useSearchParams();
+	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 	const semanticId = searchParams.get('semanticId');
 	const dataId = searchParams.get('dataId');
 	const layer: ExplorationLayer =
@@ -1510,7 +1500,7 @@ export const ExplorationView = () => {
 			} else if (nodeId) {
 				nextUrl = `/exploration?semanticId=${encodeURIComponent(nodeId)}`;
 			}
-			router.replace(nextUrl, { scroll: false });
+			navigate(nextUrl, { replace: true });
 			// No `controllerRef.current?.refresh()` here: `GraphCanvas`'s own
 			// `activeNodeId` prop-sync effect already refreshes once the ref
 			// its node/edge reducers actually read is updated (see that
@@ -1531,7 +1521,7 @@ export const ExplorationView = () => {
 				controllerRef.current?.focusNode(nodeId);
 			}
 		},
-		[layer, router],
+		[layer, navigate],
 	);
 
 	// Single-clicking a node selects it — see `handleSelectNode` above,
@@ -1940,22 +1930,20 @@ export const ExplorationView = () => {
 	const handleToggleLayer = useCallback(() => {
 		setSearch('');
 		clearGraphInteraction();
-		router.replace(
-			layer === ExplorationLayer.Semantic ? '/exploration?view=data' : '/exploration',
-			{ scroll: false },
-		);
-	}, [clearGraphInteraction, layer, router]);
+		navigate(layer === ExplorationLayer.Semantic ? '/exploration?view=data' : '/exploration', {
+			replace: true,
+		});
+	}, [clearGraphInteraction, layer, navigate]);
 
 	const handleDatabaseFilterChange = useCallback(
 		(next: string | null) => {
 			setSelectedDatabaseId(next);
 			clearGraphInteraction();
-			router.replace(
-				layer === ExplorationLayer.Data ? '/exploration?view=data' : '/exploration',
-				{ scroll: false },
-			);
+			navigate(layer === ExplorationLayer.Data ? '/exploration?view=data' : '/exploration', {
+				replace: true,
+			});
 		},
-		[clearGraphInteraction, layer, router],
+		[clearGraphInteraction, layer, navigate],
 	);
 
 	const handleControllerChange = useCallback((nextController: GraphController | null) => {
@@ -2170,7 +2158,7 @@ export const ExplorationView = () => {
 												}
 												className={`h-4 w-4 shrink-0 ${
 													node.layer === ExplorationLayer.Semantic
-														? 'text-[#76b900]'
+														? 'text-accent'
 														: 'text-[#3b82b6]'
 												}`}
 											/>
@@ -2245,7 +2233,7 @@ export const ExplorationView = () => {
 					key={activeNode.id}
 					node={activeNode}
 					onClose={() => handleSelectNode(null)}
-					onView={() => router.push(`/terms?focus=${encodeURIComponent(activeNode.id)}`)}
+					onView={() => navigate(`/terms?focus=${encodeURIComponent(activeNode.id)}`)}
 					onShowRelationships={() => setRelationshipsNodeId(activeNode.id)}
 					onShowColumnAttributes={() => setColumnAttributesNodeId(activeNode.id)}
 					onShowSqlAttributes={() => setSqlAttributesNodeId(activeNode.id)}
@@ -2258,7 +2246,7 @@ export const ExplorationView = () => {
 					node={activeNode}
 					onClose={() => handleSelectNode(null)}
 					onView={() =>
-						router.push(
+						navigate(
 							`/data?focus=${encodeURIComponent(
 								`${activeNode.databaseId}|${activeNode.schemaId}|${activeNode.id}`,
 							)}`,
@@ -2277,9 +2265,7 @@ export const ExplorationView = () => {
 					node={activeExpansionTermNode}
 					onClose={() => handleSelectNode(null)}
 					onView={() =>
-						router.push(
-							`/terms?focus=${encodeURIComponent(activeExpansionTermNode.id)}`,
-						)
+						navigate(`/terms?focus=${encodeURIComponent(activeExpansionTermNode.id)}`)
 					}
 					onShowRelationships={() => setRelationshipsNodeId(activeExpansionTermNode.id)}
 					onShowColumnAttributes={() =>
@@ -2296,7 +2282,7 @@ export const ExplorationView = () => {
 						key={activeExpansionEntity.id}
 						node={activeExpansionEntity}
 						onClose={() => handleSelectNode(null)}
-						onView={() => router.push(activeExpansionEntity.viewHref)}
+						onView={() => navigate(activeExpansionEntity.viewHref)}
 					/>
 				)}
 

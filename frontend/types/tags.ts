@@ -4,11 +4,7 @@
 
 import type { TagItemType } from '@/enums/tags';
 
-/**
- * Whoever a tag's `created_by` / `modified_by` names, as the `/api/tags` route
- * resolves it — the ids are stored in the catalog and the accounts live in the
- * `frontend` schema, so nothing but the gateway can put the two together.
- */
+/** Whoever a tag's `created_by` / `modified_by` names, as `GET api/tags?authors=1` resolves it. */
 export type TagAuthor = {
 	id: string;
 	name: string;
@@ -27,7 +23,7 @@ export type Tag = {
 	 * Who made the tag and who last renamed it, as opaque user ids.
 	 *
 	 * Each null means something of its own. `created_by` is null for a tag made
-	 * by a caller that reached the backend without the gateway; `modified_by` is
+	 * without a recorded caller; `modified_by` is
 	 * additionally null for a tag nobody has renamed, which is the same fact
 	 * `modified === created` states. Either may also hold an id that names no
 	 * account — one since deleted — and the list renders that as a null.

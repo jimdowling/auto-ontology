@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
@@ -100,12 +98,12 @@ export const FileUpload = ({
 			onDrop={handleDrop}
 			aria-disabled={disabled || undefined}
 			aria-label={ariaLabel}
-			className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors focus-visible:ring-2 focus-visible:ring-[#76b900]/40 focus-visible:outline-none ${
+			className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${
 				disabled
 					? 'cursor-default border-zinc-200 opacity-60 dark:border-zinc-800'
 					: `cursor-pointer ${
 							isDragOver
-								? 'border-[#76b900] bg-[#76b900]/5'
+								? 'border-accent bg-accent/5'
 								: 'border-zinc-300 hover:border-zinc-400 dark:border-zinc-600 dark:hover:border-zinc-500'
 						}`
 			} ${className}`}
@@ -134,7 +132,7 @@ export const FileUpload = ({
 			) : (
 				<>
 					<p className="text-sm text-body dark:text-zinc-300">
-						<span className="font-medium text-[#5e9400] dark:text-[#a3d63a]">
+						<span className="font-medium text-accent-strong dark:text-accent-soft">
 							{label}
 						</span>{' '}
 						or drag and drop

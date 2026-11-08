@@ -2,10 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, useState } from 'react';
-import NextLink from 'next/link';
+import { Link } from 'react-router';
 
 import { datasources } from '@/api/datasources';
 import { explorationApi } from '@/api/exploration';
@@ -134,16 +132,16 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 			width: 'w-10',
 			cell: (row) =>
 				target != null ? (
-					<NextLink
-						href={catalogPathFromFocusId(
+					<Link
+						to={catalogPathFromFocusId(
 							`${target.databaseId}|${target.schemaId}|${target.id}|${row.id}`,
 						)}
-						className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
+						className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-accent dark:hover:bg-zinc-700"
 						aria-label={`Open ${row.column_name} in Data`}
 						title={`Open ${row.column_name} in Data`}
 					>
 						<Icon name={IconName.ExternalLink} className="h-3.5 w-3.5" />
-					</NextLink>
+					</Link>
 				) : null,
 		},
 	];
@@ -162,14 +160,14 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 			header: '',
 			width: 'w-10',
 			cell: (row) => (
-				<NextLink
-					href={`/terms?focus=${encodeURIComponent(row.id)}`}
-					className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
+				<Link
+					to={`/terms?focus=${encodeURIComponent(row.id)}`}
+					className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-accent dark:hover:bg-zinc-700"
 					aria-label={`Open ${row.name} term`}
 					title={`Open ${row.name} term`}
 				>
 					<Icon name={IconName.ExternalLink} className="h-3.5 w-3.5" />
-				</NextLink>
+				</Link>
 			),
 		},
 	];

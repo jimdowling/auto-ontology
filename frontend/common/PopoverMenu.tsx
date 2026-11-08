@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { type ReactNode } from 'react';
 import { SelectButton } from '@/common/Button';
 import { Popover } from '@/common/Popover';

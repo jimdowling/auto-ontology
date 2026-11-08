@@ -2,9 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
-import { useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/common/Button';
 import { Spinner } from '@/common/Spinner';
@@ -28,7 +25,7 @@ const iconColorClass: Record<ToastVariant, string> = {
 	[ToastVariant.Error]: 'text-red-600 dark:text-red-400',
 	[ToastVariant.Success]: 'text-emerald-600 dark:text-emerald-400',
 	[ToastVariant.Info]: 'text-sky-600 dark:text-sky-400',
-	[ToastVariant.Loading]: 'text-[#76b900]',
+	[ToastVariant.Loading]: 'text-accent',
 };
 
 const VariantIcon = ({ variant }: { variant: ToastVariant }) => {
@@ -83,12 +80,6 @@ const defaultTitle: Record<ToastVariant, string | undefined> = {
 const capitalizeFirst = (value: string): string =>
 	value.length === 0 ? value : value.charAt(0).toUpperCase() + value.slice(1);
 
-// Track hydration via useSyncExternalStore so the snapshot differs between
-// server (false) and client (true) without a setState-in-effect.
-const subscribeHydration = () => () => {};
-const getHydratedSnapshot = () => true;
-const getHydratedServerSnapshot = () => false;
-
 export const Toast = ({
 	open,
 	message,
@@ -96,13 +87,7 @@ export const Toast = ({
 	variant = ToastVariant.Error,
 	onClose,
 }: ToastProps) => {
-	const mounted = useSyncExternalStore(
-		subscribeHydration,
-		getHydratedSnapshot,
-		getHydratedServerSnapshot,
-	);
-
-	if (!mounted || !open) return null;
+	if (!open) return null;
 
 	const resolvedTitle = title ?? defaultTitle[variant];
 

@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, useRef } from 'react';
 import type { ChatMessage, GraphStep } from '@/types/chat';
 import { EmptyState } from '@/common/EmptyState';
@@ -59,8 +57,8 @@ export const MessageList = ({
 			<EmptyState
 				variant={EmptyStateVariant.Welcome}
 				illustration={
-					<div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#76b900]/15">
-						<Icon name={IconName.ChatBubble} className="h-7 w-7 text-[#76b900]" />
+					<div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15">
+						<Icon name={IconName.ChatBubble} className="h-7 w-7 text-accent" />
 					</div>
 				}
 				title="Ask a Question"

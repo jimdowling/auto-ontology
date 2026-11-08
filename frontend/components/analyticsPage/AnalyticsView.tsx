@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, useState } from 'react';
 
 import { Button } from '@/common/Button';
@@ -39,8 +37,8 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 		nowrap: true,
 		truncate: true,
 		className: 'text-body dark:text-zinc-300',
-		cell: (row) => row.user.name || row.user.email,
-		title: (row) => row.user.name || row.user.email,
+		cell: (row) => row.username,
+		title: (row) => row.username,
 	},
 	{
 		key: 'source',
@@ -118,7 +116,7 @@ export const AnalyticsView = () => {
 			...analytics.map((row) =>
 				[
 					formatDate(row.question_timestamp),
-					row.user.name || row.user.email,
+					row.username,
 					row.source ?? '',
 					row.question ?? '',
 					row.response ?? '',
@@ -132,7 +130,7 @@ export const AnalyticsView = () => {
 
 		const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
 		const url = URL.createObjectURL(blob);
-		const filename = `auto-ontology-analytics-${formatDate(Date.now(), 'YYYY-MM')}.csv`;
+		const filename = `ontology-analytics-${formatDate(Date.now(), 'YYYY-MM')}.csv`;
 		const anchor = document.createElement('a');
 		anchor.href = url;
 		anchor.download = filename;

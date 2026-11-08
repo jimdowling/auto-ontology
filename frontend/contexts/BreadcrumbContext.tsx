@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import {
 	createContext,
 	useCallback,
@@ -13,7 +11,7 @@ import {
 	useState,
 	type ReactNode,
 } from 'react';
-import { usePathname } from 'next/navigation';
+import { useLocation } from 'react-router';
 import type { BreadcrumbItem } from '@/common/Breadcrumbs';
 
 const SECTION_LABELS: Record<string, string> = {
@@ -28,16 +26,12 @@ const SECTION_LABELS: Record<string, string> = {
 };
 
 const SETTINGS_SECTION_LABELS: Record<string, string> = {
-	connections: 'Connections',
-	zones: 'Zones',
 	tags: 'Tags',
 	rules: 'Rules',
 	'semantic-input': 'Semantic Input',
 	'semantic-compilation': 'Semantic Compilation',
 	pii: 'PII Settings',
 	'agent-settings': 'Agent Settings',
-	users: 'Users',
-	sso: 'Single Sign-On',
 	'import-export': 'Import / Export',
 };
 
@@ -79,7 +73,7 @@ const BreadcrumbContext = createContext<BreadcrumbContextValue>({
 });
 
 export const BreadcrumbProvider = ({ children }: { children: ReactNode }) => {
-	const pathname = usePathname();
+	const { pathname } = useLocation();
 	const [prevPath, setPrevPath] = useState<string | null>(null);
 	const [routeCrumbs, setRouteCrumbs] = useState<BreadcrumbItem[]>(EMPTY_TRAIL);
 	const [trail, setTrailRaw] = useState<BreadcrumbItem[]>(EMPTY_TRAIL);

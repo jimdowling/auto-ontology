@@ -15,7 +15,6 @@ import type {
 	ExplorationNode,
 	ExplorationRelationshipsPageDto,
 	ExplorationTermNode,
-	ExplorationZonesMap,
 	SemanticExplorationGraph,
 	SqlAttributeExplorationDetails,
 	SqlExplorationDetails,
@@ -104,7 +103,6 @@ export const explorationApi = {
 					name: node.name,
 					description: null,
 					synonyms: [],
-					zones: [],
 					layer: ExplorationLayer.Semantic,
 					nodeType: 'term',
 					relationshipCount: node.relationship_count,
@@ -126,13 +124,10 @@ export const explorationApi = {
 				columnsCount: 0,
 				sqlCount: 0,
 				termsCount: 0,
-				zones: [],
 			} satisfies ExplorationDataNode;
 		});
 		return { data: nodes, total: page?.total ?? 0 };
 	},
-
-	getTableZonesMap: () => requests.get<{ data: ExplorationZonesMap }>('exploration/tables/zones'),
 
 	/** Semantic-layer Exploration graph ({nodes, links}) in a single request. */
 	getSemanticExplorationGraph: (databaseId?: string) =>

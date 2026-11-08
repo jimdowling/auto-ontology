@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { Icon, IconName } from '@/common/icons';
 import {
 	SEARCH_TYPE_ICON,
@@ -23,8 +21,8 @@ type GlobalSearchTabsProps = {
 
 const tabClass = (selected: boolean) =>
 	selected
-		? 'inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#76b900] px-2.5 py-1.5 text-white'
-		: 'inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-body shadow-sm ring-1 ring-zinc-200 hover:bg-[#76b900]/10 hover:text-[#4d7a00] dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700 dark:hover:bg-[#76b900]/15';
+		? 'inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-white'
+		: 'inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-body shadow-sm ring-1 ring-zinc-200 hover:bg-accent/10 hover:text-accent-deep dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700 dark:hover:bg-accent/15';
 
 export const totalGlobalSearchCount = (counts: Record<string, number>): number =>
 	Object.values(counts).reduce((sum, value) => sum + value, 0);

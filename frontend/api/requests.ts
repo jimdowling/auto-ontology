@@ -19,10 +19,10 @@ export const pageQuery = ({ skip, limit }: PageParams = {}): QueryParams => ({
 	...(limit != null ? { limit } : {}),
 });
 
-const isServer = typeof window === 'undefined';
-
 const api = axios.create({
-	baseURL: isServer ? `${process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001'}/api` : '/api',
+	// Relative, without a leading slash, so it resolves under the app proxy's
+	// /hopsworks-api/pythonapp/<project>/<app>/ prefix.
+	baseURL: 'api',
 	headers: {
 		'Content-Type': 'application/json',
 	},
@@ -32,12 +32,8 @@ const responseBody = <DataType>({ data }: AxiosResponse<DataType>): DataType => 
 
 const extractServerMessage = (data: unknown): string | undefined => {
 	if (data == null || typeof data !== 'object') return undefined;
-	// `detail` is FastAPI's shape; `error` is what the Next route handlers under
-	// app/api use. Reading only the first meant every message those routes went
-	// out of their way to produce surfaced as "Request failed with status 400".
-	const { detail, error } = data as { detail?: unknown; error?: unknown };
-	if (typeof detail === 'string') return detail;
-	return typeof error === 'string' ? error : undefined;
+	const { detail } = data as { detail?: unknown };
+	return typeof detail === 'string' ? detail : undefined;
 };
 
 const errorHandler = (err: AxiosError): ApiError => {

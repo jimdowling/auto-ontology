@@ -20,7 +20,9 @@ const getResponseErrorMessage = async (res: Response): Promise<string> => {
 	try {
 		const { detail } = JSON.parse(text) as { detail?: unknown };
 		if (typeof detail === 'string' && detail.trim()) return detail;
-	} catch {}
+	} catch {
+		// Not JSON: the body text is the message.
+	}
 	return text;
 };
 
@@ -146,7 +148,7 @@ export const streamChat = (
 
 	(async () => {
 		try {
-			const res = await fetch('/api/chat/completions', {
+			const res = await fetch('api/chat/completions', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'x-auto-ontology-source': 'app' },
 				body,
@@ -194,7 +196,7 @@ export const watchChat = (
 	(async () => {
 		try {
 			const res = await fetch(
-				`/api/chat/watch?conversation_id=${encodeURIComponent(conversationId)}`,
+				`api/chat/watch?conversation_id=${encodeURIComponent(conversationId)}`,
 				{ signal: controller.signal },
 			);
 
@@ -223,7 +225,7 @@ export const watchChat = (
  * means the agent finishes on its own.
  */
 export const cancelChat = async (conversationId: string): Promise<void> => {
-	await fetch(`/api/chat/cancel?conversation_id=${encodeURIComponent(conversationId)}`, {
+	await fetch(`api/chat/cancel?conversation_id=${encodeURIComponent(conversationId)}`, {
 		method: 'POST',
 	});
 };

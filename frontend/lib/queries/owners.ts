@@ -31,7 +31,3 @@ export const ownerQueries = {
  */
 export const fetchOwnerDirectory = (queryClient: QueryClient): Promise<Owner[]> =>
 	queryClient.fetchQuery(ownerQueries.all()).catch(() => []);
-
-/** Drop the cached directory so an open picker refetches users and groups. */
-export const invalidateOwners = (queryClient: QueryClient): Promise<void> =>
-	queryClient.invalidateQueries({ queryKey: ALL_KEY });

@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, useMemo, useState } from 'react';
 
 import { datasources } from '@/api/datasources';
@@ -135,7 +133,7 @@ export const DatabaseFilter = ({ selected, onChange }: DatabaseFilterProps) => {
 										onChange(null);
 										close();
 									}}
-									className="h-4 w-4 cursor-pointer border-zinc-300 text-[#76b900] focus:ring-[#76b900]/40 dark:border-zinc-600"
+									className="h-4 w-4 cursor-pointer border-zinc-300 text-accent focus:ring-accent/40 dark:border-zinc-600"
 								/>
 								<span className="inline-flex shrink-0" aria-hidden>
 									<Icon

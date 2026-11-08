@@ -2,17 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
-import {
-	PaginationArrowButton,
-	PaginationItemRangeText,
-	PaginationNavigationGroup,
-	PaginationPageList,
-	PaginationRoot,
-} from '@nvidia/foundations-react-core';
-
 import { EmptyState } from '@/common/EmptyState';
+import { Pagination } from '@/common/Pagination';
 import { Text } from '@/common/Text';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import type { TableColumn, TableProps } from '@/types/table';
@@ -45,16 +36,6 @@ const bodyCellClasses = <T,>(column: TableColumn<T>, cellClassName: string): str
 		column.truncate && (column.maxWidthClass ?? 'max-w-0'),
 		column.className,
 	);
-
-const defaultRangeText = ({
-	firstItemIndex,
-	lastItemIndex,
-	totalItems,
-}: {
-	firstItemIndex: number;
-	lastItemIndex: number;
-	totalItems: number;
-}) => `${firstItemIndex}-${lastItemIndex} out of ${totalItems}`;
 
 export const Table = <T,>({
 	columns,
@@ -169,22 +150,10 @@ export const Table = <T,>({
 		<div className={cx(containerClassName ?? DEFAULT_CONTAINER, className)}>
 			{scrollClassName ? <div className={scrollClassName}>{tableElement}</div> : tableElement}
 			{pagination && (
-				<PaginationRoot
-					totalItems={pagination.totalItems}
-					pageSize={pagination.pageSize}
-					page={pagination.page}
-					onPageChange={pagination.onPageChange}
+				<Pagination
+					{...pagination}
 					className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-800"
-				>
-					<PaginationNavigationGroup withTabs>
-						<PaginationArrowButton direction="previous" />
-						<PaginationPageList />
-						<PaginationArrowButton direction="next" />
-					</PaginationNavigationGroup>
-					<PaginationItemRangeText
-						rangeTextFormatFn={pagination.rangeTextFormatFn ?? defaultRangeText}
-					/>
-				</PaginationRoot>
+				/>
 			)}
 		</div>
 	);

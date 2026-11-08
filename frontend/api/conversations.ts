@@ -30,25 +30,25 @@ async function json<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 }
 
 export const conversationsApi = {
-	list: () => json<ConversationSummary[]>('/api/conversations'),
+	list: () => json<ConversationSummary[]>('api/conversations'),
 
 	create: (title: string) =>
-		json<ConversationSummary>('/api/conversations', {
+		json<ConversationSummary>('api/conversations', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ title }),
 		}),
 
-	get: (id: string) => json<ConversationDetail>(`/api/conversations/${id}`),
+	get: (id: string) => json<ConversationDetail>(`api/conversations/${id}`),
 
 	rename: (id: string, title: string) =>
-		json<ConversationSummary>(`/api/conversations/${id}`, {
+		json<ConversationSummary>(`api/conversations/${id}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ title }),
 		}),
 
-	delete: (id: string) => fetch(`/api/conversations/${id}`, { method: 'DELETE' }),
+	delete: (id: string) => fetch(`api/conversations/${id}`, { method: 'DELETE' }),
 
 	addMessage: (
 		conversationId: string,
@@ -59,7 +59,7 @@ export const conversationsApi = {
 			sqlResponse?: string | null;
 		},
 	) =>
-		json<{ id: string }>(`/api/conversations/${conversationId}/messages`, {
+		json<{ id: string }>(`api/conversations/${conversationId}/messages`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			// Callers pass the camelCase shape the chat UI works in; the API

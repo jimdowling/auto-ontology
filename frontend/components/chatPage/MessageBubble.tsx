@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useMemo } from 'react';
 import type { ChatMessage } from '@/types/chat';
 import { CopyButton } from '@/common/Button';
@@ -95,7 +93,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 			<div
 				className={`max-w-[80%] rounded-2xl px-4 py-3 ${wideAssistant ? 'w-full' : ''} ${
 					isUser
-						? 'bg-[#76b900] text-white'
+						? 'bg-accent text-white'
 						: 'bg-zinc-100 text-heading dark:bg-zinc-800 dark:text-zinc-100'
 				}`}
 			>

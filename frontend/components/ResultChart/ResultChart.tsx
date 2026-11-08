@@ -9,8 +9,6 @@
  * only maps the emitted primitive marks to SVG and wires interaction.
  */
 
-'use client';
-
 import { type FC, type MouseEvent, type ReactNode, useId, useMemo, useRef, useState } from 'react';
 import { CHART_WIDTH, chartHeight, plotBox } from './geometry';
 import { seriesColor } from './palette';

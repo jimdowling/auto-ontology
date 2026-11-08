@@ -2,10 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useRef, useState, type ReactNode } from 'react';
-import { Tooltip } from '@nvidia/foundations-react-core';
+import { Tooltip } from '@/common/Tooltip';
 import { TextVariant } from '@/enums/text';
 
 type TextElement = 'span' | 'p' | 'div' | 'h1' | 'h2' | 'h3' | 'h4';
@@ -124,16 +122,12 @@ export const Text = ({
 		</Element>
 	);
 
-	// An intact value renders as a bare element. Wrapping it anyway would cost
-	// a tooltip root, a popper and a portal per line, and most of the lines on
-	// a page — tree rows, tags, headings, table cells that comfortably fit —
-	// are never clipped.
+	// An intact value renders as a bare element: most lines on a page are
+	// never clipped, and each tooltip adds handlers and a wrapper.
 	if (tooltip === '') return line;
 
-	// Open delay and skip window come from the `TooltipProvider` the root layout
-	// puts around the app, so they stay consistent with every other tooltip.
 	return (
-		<Tooltip slotContent={tooltip} side="bottom" align="start" className={TOOLTIP_CLASS}>
+		<Tooltip content={tooltip} className={TOOLTIP_CLASS}>
 			{line}
 		</Tooltip>
 	);

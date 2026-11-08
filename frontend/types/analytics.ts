@@ -2,11 +2,10 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { User } from '@/types/auth';
-
 export type ConversationAnalytics = {
 	id: string;
-	user: User;
+	/** The Hopsworks user who asked. */
+	username: string;
 	source: string;
 	question: string;
 	question_timestamp: string;

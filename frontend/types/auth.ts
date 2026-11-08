@@ -1,18 +1,13 @@
-// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { authClient } from '@/auth/auth-client';
-import { Role } from '@/enums/auth';
+import type { Role } from '@/enums/auth';
 
-/** Session shape inferred from the configured Better Auth client. */
-export type AppSession = typeof authClient.$Infer.Session;
-
-/** Authenticated user, including the admin plugin's `role` field. */
-type AppUser = AppSession['user'];
-
-export type User = Pick<AppUser, 'id' | 'name' | 'email'> & {
+/** The signed-in Hopsworks user, from `GET api/me`. */
+export type Me = {
+	username: string;
 	role: Role;
+	/** `resource:action` strings the role grants. */
+	permissions: string[];
 };
-
-export type UpdateUserInput = Pick<User, 'name' | 'role'>;

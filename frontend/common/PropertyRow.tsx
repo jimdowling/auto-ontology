@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { CopyButton } from '@/common/Button';
 
 export type PropertyRowProps = {

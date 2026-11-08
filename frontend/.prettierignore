@@ -3,16 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Build output
-.next/
-out/
-build/
 coverage/
 
 # Dependencies
 node_modules/
-
-# Auto-generated Prisma client
-generated/
 
 # Lockfiles (managed by package managers)
 pnpm-lock.yaml

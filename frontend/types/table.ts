@@ -54,7 +54,7 @@ export type TableProps<T> = {
 	rows: T[];
 	/** Extracts a stable React key for a row. */
 	rowKey: (row: T, index: number) => string;
-	/** When provided, renders a paginated footer (the Kaizen pager). */
+	/** When provided, renders a paginated footer. */
 	pagination?: TablePagination;
 	/** Column sizing strategy. Defaults to `fixed` (table-fixed). */
 	layout?: 'fixed' | 'auto';

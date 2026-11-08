@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
@@ -195,7 +193,7 @@ const ObjectsFilter = ({
 									type="checkbox"
 									checked={checked}
 									onChange={() => toggleType(type)}
-									className="h-4 w-4 shrink-0 accent-[#76b900]"
+									className="h-4 w-4 shrink-0 accent-accent"
 								/>
 								<Icon
 									name={SEARCH_TYPE_ICON[type]}
@@ -223,7 +221,7 @@ const TagOption = ({ label, checked, onToggle }: TagOptionProps) => (
 			type="checkbox"
 			checked={checked}
 			onChange={onToggle}
-			className="h-4 w-4 shrink-0 accent-[#76b900]"
+			className="h-4 w-4 shrink-0 accent-accent"
 		/>
 		<span className="truncate">{label}</span>
 	</label>

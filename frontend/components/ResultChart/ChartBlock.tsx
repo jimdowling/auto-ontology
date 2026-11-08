@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { type FC, type ReactNode, useMemo } from 'react';
 import { parseCarouselSpec, parseChartSpec, parseKpiSpec } from './parse';
 import { degenerateKpis, normalizeChart } from './normalize';

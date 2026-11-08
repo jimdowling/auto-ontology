@@ -2,11 +2,9 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Spinner } from '@/common/Spinner';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useChat } from '@/lib/useChat';
 import type { Conversation } from '@/types/chat';
 import {
@@ -22,9 +20,9 @@ import { ChatInput } from './ChatInput';
 import { SemanticNotReady } from './SemanticNotReady';
 
 export const ChatView = () => {
-	const router = useRouter();
-	const pathname = usePathname();
-	const searchParams = useSearchParams();
+	const navigate = useNavigate();
+	const { pathname } = useLocation();
+	const [searchParams] = useSearchParams();
 	const rawFocus = searchParams.get('focus');
 	const focusId = rawFocus != null && rawFocus.trim() !== '' ? rawFocus.trim() : null;
 
@@ -58,9 +56,9 @@ export const ChatView = () => {
 				params.delete('focus');
 			}
 			const query = params.toString();
-			router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+			navigate(query ? `${pathname}?${query}` : pathname, { replace: true });
 		},
-		[router, pathname, searchParams],
+		[navigate, pathname, searchParams],
 	);
 
 	const refreshConversations = useCallback(async () => {

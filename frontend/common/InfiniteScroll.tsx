@@ -2,11 +2,9 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
+import { Spinner } from '@/common/Spinner';
 
 import { Button } from '@/common/Button';
 import { ButtonTheme, Size } from '@/enums/button';

@@ -6,7 +6,7 @@
  * Where the tag vocabulary lives in the query cache.
  *
  * The key is here rather than at each call site because it is the thing that
- * makes them one read: the root layout prefetches under it, every picker
+ * makes them one read: the app shell prefetches under it, every picker
  * subscribes to it, and the settings page invalidates it. Spelling it twice
  * would quietly give the app two vocabularies.
  */
@@ -41,13 +41,7 @@ const readVocabulary = async (): Promise<TagChip[]> => {
 };
 
 export const tagQueries = {
-	/**
-	 * Usable from both sides of the render, which is what lets the layout
-	 * prefetch exactly what the browser then subscribes to: `requests` picks
-	 * the backend directly on the server and the permission-gated `/api/tags`
-	 * route in the browser, and that route is a plain proxy for a read that
-	 * asks for no authors — so both get the same answer.
-	 */
+	/** Prefetched by the app shell, so the pickers subscribe to a read already in flight. */
 	vocabulary: () =>
 		queryOptions({
 			queryKey: VOCABULARY_KEY,
@@ -75,8 +69,8 @@ export const invalidateTagVocabulary = (queryClient: QueryClient): Promise<void>
  * publish the new tag as the entire vocabulary — a success, so the panel
  * would stop reporting the failure too. Re-reading says what is true.
  *
- * Cancels a read in flight first, for the reason the zone and connection
- * lists do: an answer given before the tag existed must not land after it.
+ * Cancels a read in flight first: an answer given before the tag existed
+ * must not land after it.
  */
 export const addTagToVocabulary = async (queryClient: QueryClient, tag: TagChip): Promise<void> => {
 	await queryClient.cancelQueries({ queryKey: VOCABULARY_KEY });

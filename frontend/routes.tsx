@@ -35,6 +35,11 @@ const DataWorkspaceView = lazy(() =>
 const AnalyticsView = lazy(() =>
 	import('@/components/analyticsPage/AnalyticsView').then((m) => ({ default: m.AnalyticsView })),
 );
+const SourcesSettingsPage = lazy(() =>
+	import('@/pages/settings/sources/SourcesSettingsPage').then((m) => ({
+		default: m.SourcesSettingsPage,
+	})),
+);
 const TagsSettingsView = lazy(() =>
 	import('@/pages/settings/tags/TagsSettingsView').then((m) => ({
 		default: m.TagsSettingsView,
@@ -140,7 +145,8 @@ export const router = createHashRouter([
 					</RequireAdmin>
 				),
 				children: [
-					{ index: true, element: <Navigate to="tags" replace /> },
+					{ index: true, element: <Navigate to="sources" replace /> },
+					{ path: 'sources', element: <SourcesSettingsPage /> },
 					{ path: 'tags', element: <TagsSettingsView /> },
 					{ path: 'rules', element: <RulesSettingsPage /> },
 					{ path: 'pii', element: <PiiSettingsPage /> },

@@ -26,6 +26,7 @@ const SECTION_LABELS: Record<string, string> = {
 };
 
 const SETTINGS_SECTION_LABELS: Record<string, string> = {
+	sources: 'Sources',
 	tags: 'Tags',
 	rules: 'Rules',
 	'semantic-input': 'Semantic Input',

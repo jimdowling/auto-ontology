@@ -7,6 +7,7 @@ import { Link, useLocation } from 'react-router';
 type NavItem = { label: string; href: string };
 
 const NAV_ITEMS: NavItem[] = [
+	{ label: 'Sources', href: '/settings/sources' },
 	{ label: 'Tags', href: '/settings/tags' },
 	{ label: 'Rules', href: '/settings/rules' },
 	{ label: 'PII Settings', href: '/settings/pii' },

@@ -56,6 +56,7 @@ class OntologyConfig:
     jobs: dict[str, str] = field(default_factory=dict)
     pii_detection: bool = False
     distinct_value_probing: bool = True
+    semantic_compilation: bool = True
 
 
 class ConfigError(ValueError):
@@ -140,6 +141,7 @@ def parse(document: dict[str, Any]) -> OntologyConfig:
             jobs=dict(document.get("jobs") or {}),
             pii_detection=bool(document.get("pii_detection", False)),
             distinct_value_probing=bool(document.get("distinct_value_probing", True)),
+            semantic_compilation=bool(document.get("semantic_compilation", True)),
         )
     except KeyError as missing:
         raise ConfigError(f"ontology.yaml is missing {missing}") from None

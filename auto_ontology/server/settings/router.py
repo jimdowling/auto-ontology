@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, StrictBool
 
 from auto_ontology.dal import settings as dal
 from auto_ontology.dal.types import utcnow
+from auto_ontology.ingestion_service.config import SEMANTIC_COMPILATION_ENABLED_KEY
 from auto_ontology.infra.feature_flags import (
     DISTINCT_VALUE_PROBING_ENABLED_KEY,
     MAX_SQL_QUERY_TIMEOUT_SECONDS,
@@ -33,7 +34,6 @@ from auto_ontology.infra.feature_flags import (
 
 router = APIRouter()
 
-SEMANTIC_COMPILATION_ENABLED_KEY = "semantic_compilation_enabled"
 VISUALIZATION_ENABLED_KEY = "visualization_enabled"
 ANALYTICS_DAYS = 30
 

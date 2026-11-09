@@ -11,12 +11,17 @@ Each flag carries its own default for the "row absent or unreadable" case, and
 the defaults genuinely differ: semantic compilation and PII detection are
 opt-in (absent means off), while column profiling is opt-out (absent means on,
 so existing instances keep profiling after an upgrade that adds the toggle).
+On Hopsworks a new system's ``ontology.yaml`` sets all three
+(:func:`seed_from_config`), compilation on unless it says otherwise.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from auto_ontology.hopsworks.config import OntologyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -152,3 +157,21 @@ def get_sql_query_timeout_seconds() -> int:
         minimum=MIN_SQL_QUERY_TIMEOUT_SECONDS,
         maximum=MAX_SQL_QUERY_TIMEOUT_SECONDS,
     )
+
+
+def seed_from_config(config: OntologyConfig) -> list[str]:
+    """Store ``ontology.yaml``'s switches for every key Settings has never set;
+    returns the keys stored. After that the Settings page is the record."""
+    from auto_ontology.dal.settings import seed_configuration
+    from auto_ontology.ingestion_service.config import SEMANTIC_COMPILATION_ENABLED_KEY
+
+    switches = {
+        SEMANTIC_COMPILATION_ENABLED_KEY: config.semantic_compilation,
+        PII_DETECTION_ENABLED_KEY: config.pii_detection,
+        DISTINCT_VALUE_PROBING_ENABLED_KEY: config.distinct_value_probing,
+    }
+    return [
+        key
+        for key, enabled in switches.items()
+        if seed_configuration(key, "true" if enabled else "false")
+    ]

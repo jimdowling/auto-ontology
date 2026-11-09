@@ -245,8 +245,8 @@ export const SourcesSettingsPage = () => {
 				title="Remove Source"
 				message={
 					<>
-						Stop ingesting <strong>{removing?.name}</strong>? Catalog objects it already
-						produced stay until the next ingest.
+						Stop ingesting <strong>{removing?.name}</strong>? The reset job then deletes
+						its catalog, semantic layer and vectors.
 					</>
 				}
 				confirmLabel="Remove"

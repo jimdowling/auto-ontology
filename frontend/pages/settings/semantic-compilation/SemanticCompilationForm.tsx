@@ -229,7 +229,9 @@ export const SemanticCompilationForm = ({
 									Enable Semantic Compilation
 								</span>
 								<span className="text-xs text-secondary">
-									{enabled ? 'Running on the 24h schedule.' : 'Currently off.'}
+									{enabled
+										? "Runs on the compile job's schedule."
+										: 'Currently off.'}
 								</span>
 							</div>
 							<Toggle

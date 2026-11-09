@@ -4,8 +4,9 @@
 
 """Read the sources into the catalog and embed what changed.
 
-Stores ``ontology.yaml``'s sources first when the store has none
-(:func:`auto_ontology.connectors.sources.seed_sources`), then ingests every
+Stores ``ontology.yaml``'s switches and sources first when the store has
+none (:func:`auto_ontology.infra.feature_flags.seed_from_config`,
+:func:`auto_ontology.connectors.sources.seed_sources`), then ingests every
 source, or only ``--source <data source name>``. A failure in one source does
 not stop the others. Afterwards the tagging rules are replayed and, when
 semantic compilation is switched on, the compile job is started, so a new
@@ -67,11 +68,14 @@ def main(argv: list[str]) -> int:
 
     from auto_ontology.connectors.sources import seed_sources
     from auto_ontology.hopsworks.config import load
+    from auto_ontology.infra.feature_flags import seed_from_config
     from auto_ontology.ingestion_service.config import is_semantic_compilation_enabled
     from auto_ontology.ingestion_service.rules import replay_rules
 
     with pipeline_lease():
-        seeded = seed_sources(load())
+        config = load()
+        seed_from_config(config)
+        seeded = seed_sources(config)
         if seeded:
             logger.info("Added the sources from ontology.yaml: %s", ", ".join(seeded))
         succeeded, failed = ingest_sources(args.source)

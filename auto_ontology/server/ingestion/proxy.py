@@ -53,8 +53,3 @@ def trigger_semantic_reset(database_name: str | None = None) -> None:
 def trigger_reset(database_name: str) -> None:
     """Remove a deleted source's catalog, semantic layer and vectors."""
     _start("reset", f"--all --database {shlex.quote(database_name)}")
-
-
-def trigger_embed() -> None:
-    """Reconcile vectors after edits; repeated calls collapse into one run."""
-    _start("embed")

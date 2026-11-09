@@ -46,3 +46,26 @@ def test_prompt_lifecycle() -> None:
     assert settings.update_prompt(prompt["id"], "Use UTC.")["content"] == "Use UTC."
     assert settings.delete_prompt(prompt["id"])
     assert settings.get_prompt(prompt["id"]) is None
+
+
+def test_ontology_yaml_switches_seed_only_unset_keys() -> None:
+    from types import SimpleNamespace
+
+    from auto_ontology.dal import schema as s
+    from auto_ontology.dal import settings
+    from auto_ontology.dal.session import store
+    from auto_ontology.infra.feature_flags import seed_from_config
+
+    store().query_write(s.configurations.delete())
+    settings.set_configuration("pii_detection_enabled", "true")
+    config = SimpleNamespace(
+        semantic_compilation=True, pii_detection=False, distinct_value_probing=False
+    )
+    assert seed_from_config(config) == [
+        "semantic_compilation_enabled",
+        "distinct_value_probing_enabled",
+    ]
+    assert settings.get_configuration("pii_detection_enabled") == "true"
+    assert settings.get_configuration("semantic_compilation_enabled") == "true"
+    assert settings.get_configuration("distinct_value_probing_enabled") == "false"
+    assert seed_from_config(config) == []

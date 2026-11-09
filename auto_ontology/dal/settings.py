@@ -46,6 +46,14 @@ def set_configuration(key: str, value: str) -> None:
     )
 
 
+def seed_configuration(key: str, value: str) -> bool:
+    """Store ``value`` under ``key`` unless the key is already set; returns whether it was stored."""
+    if get_configuration(key) is not None:
+        return False
+    ops.upsert(s.configurations, {"key": key, "value": value}, key=["key"])
+    return True
+
+
 def list_acronyms(*, newest_first: bool = False) -> list[dict[str, Any]]:
     """Every acronym, oldest first unless ``newest_first``."""
     order = s.acronyms.c.created_at.desc() if newest_first else s.acronyms.c.created_at

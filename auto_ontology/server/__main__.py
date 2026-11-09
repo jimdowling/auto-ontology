@@ -56,27 +56,34 @@ from auto_ontology.server.sources.router import router as sources_router  # noqa
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-def _migrate_if_on_hopsworks() -> None:
-    """Apply pending schema steps through the app-tables API when launched as a
-    Hopsworks app; the app is the store's one migrator (see dal.migrations)."""
+def _prepare_store_on_hopsworks() -> None:
+    """When launched as a Hopsworks app: apply pending schema steps through the
+    app-tables API (the app is the store's one migrator, see dal.migrations),
+    then store ``ontology.yaml``'s switches that Settings has never set."""
     from auto_ontology.hopsworks.launch import app_handle
 
     handle = app_handle()
     if handle is None:
+        require_current_schema()
         return
     from auto_ontology.dal.migrations import AppTablesDDL, migrate
+    from auto_ontology.hopsworks.config import load
+    from auto_ontology.infra.feature_flags import seed_from_config
 
     applied = migrate(AppTablesDDL(handle))
     if applied:
         logger.info("Applied %d schema step(s): %s", len(applied), ", ".join(applied))
+    require_current_schema()
+    seeded = seed_from_config(load())
+    if seeded:
+        logger.info("Settings from ontology.yaml: %s", ", ".join(seeded))
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Here rather than in `create_app`: the OpenAPI spec generator builds the
     # app with no database at all, and the lifespan runs only when it is served.
-    _migrate_if_on_hopsworks()
-    require_current_schema()
+    _prepare_store_on_hopsworks()
 
     # Kick off the chat worker pool's initial warm spawn at boot. The pool
     # itself is lazy on first use, but eagerly initialising here means the

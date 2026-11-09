@@ -34,23 +34,24 @@ from sqlalchemy import select  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal import terms as t  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.types import new_id  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM term LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.term.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable: {exc}")
 
 
 def _add(table, **values) -> str:
-    return store().query_write(table.insert().values(**values).returning(table.c.id))[
-        0
-    ]["id"]
+    values.setdefault("id", new_id())
+    store().query_write(table.insert().values(**values))
+    return values["id"]
 
 
 def _link(table, **values) -> None:
@@ -237,6 +238,20 @@ def test_paging_is_stable_and_covers_every_row(world) -> None:
         page = t.fetch_all_terms(search=world.prefix, skip=skip, limit=2)
         seen.extend(r["id"] for r in page)
     assert len(seen) == len(set(seen)) == 5
+
+
+def test_the_list_carries_each_terms_schema_names_once_and_sorted(world) -> None:
+    world.table("orders")
+    world.table("invoices")
+    archive = _add(s.catalog_schema, database_id=world.database, name="archive")
+    world.tables["old_orders"] = _add(
+        s.catalog_table, schema_id=archive, name="old_orders"
+    )
+    world.term("Order", represents=("orders", "invoices", "old_orders"))
+    world.term("Floating")
+
+    [row] = _mine(t.fetch_all_terms(), world)
+    assert row["schema_names"] == ["archive", "public"]
 
 
 # --------------------------------------------------------------------------
@@ -471,6 +486,29 @@ def test_upsert_table_term_qualifies_only_a_cross_table_name_collision(world) ->
 
 def test_upsert_table_term_writes_nothing_when_the_table_is_missing() -> None:
     assert t.upsert_table_term("Ghost", "x", "no-such-table") is None
+
+
+def test_upsert_table_term_moves_on_when_another_compiler_takes_the_name(
+    world, monkeypatch
+) -> None:
+    """The name is read free, then taken by a concurrent writer before the insert.
+
+    The insert must not share that writer's Term; it qualifies the name instead.
+    """
+    world.table("orders")
+    proposed = f"{world.prefix}-Record"
+    real_upsert = t.upsert
+
+    def racing(table, values, **kwargs):
+        if table is s.term and values["name"] == proposed:
+            _add(s.term, name=proposed, source=SEMANTIC_SOURCE)
+        return real_upsert(table, values, **kwargs)
+
+    monkeypatch.setattr(t, "upsert", racing)
+    result = t.upsert_table_term(proposed, "orders", world.tables["orders"])
+
+    assert result is not None
+    assert result[1] == f"{proposed} ({world.prefix}.public.orders)"
 
 
 # --------------------------------------------------------------------------
@@ -794,6 +832,28 @@ def test_a_term_with_no_ingestion_sql_is_omitted(world) -> None:
     assert [
         r for r in t.fetch_terms_with_sqls() if r["term_id"] == world.terms["Order"]
     ] == []
+
+
+def test_terms_with_sqls_lists_a_statement_once_and_scopes_by_database(world) -> None:
+    """A statement over two tables of one term is still one entry."""
+    world.table("orders")
+    world.table("invoices")
+    world.term("Order", represents=("orders", "invoices"))
+    query = _add(s.sql_query, sql_full_query=f"SELECT joined -- {world.prefix}")
+    world.queries.append(query)
+    for table in ("orders", "invoices"):
+        _link(s.sql_query__table, sql_query_id=query, table_id=world.tables[table])
+
+    def mine(**kwargs) -> list[dict]:
+        return [
+            r
+            for r in t.fetch_terms_with_sqls(**kwargs)
+            if r["term_id"] == world.terms["Order"]
+        ]
+
+    [row] = mine(database_name=world.prefix)
+    assert [sql["sql_id"] for sql in row["sqls"]] == [query]
+    assert mine(database_name=f"{world.prefix}-other") == []
 
 
 def test_terms_and_attributes_for_table(world) -> None:

@@ -6,6 +6,15 @@ SPDX-License-Identifier: Apache-2.0
 
 # Auto Ontology
 
+> **Hopsworks fork.** This fork runs Auto Ontology inside a Hopsworks project,
+> built by the `ontology` factory: the API and UI are one Python app
+> (`auto_ontology.hopsworks.launch.app`), ingest, compile, embed, reset and
+> import are Hopsworks jobs (`auto_ontology/jobs`), the store is the app's
+> RonDB tables, vectors live in feature groups with embedding indexes, sources
+> are Hopsworks data sources, and identity comes from the Hopsworks app proxy.
+> The Postgres, Vault, Next.js and Helm deployment described below does not
+> apply to it. Local development: `make ndb-up && make test`.
+
 Agents can retrieve documents and query databases, but reliability gates agentic analytics: a revenue metric answered faster is worth nothing if the number is wrong. Agents need a context layer that tells them where data lives, what it means, whether to use it, how to use it, where it came from, and what is similar. NVIDIA Auto Ontology is an open library that builds that layer from enterprise metadata, reconciles definitions across systems, and exposes it to any agent harness through MCP, CLI, and API. It complements the semantic models customers already own.
 
 It enables developers to:

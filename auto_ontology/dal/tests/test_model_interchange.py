@@ -30,25 +30,28 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy import select  # noqa: E402
 
 from auto_ontology.dal import model_interchange as mi  # noqa: E402
+from auto_ontology.dal import session  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.ops import insert_returning  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
+from auto_ontology.server.model_interchange.schemas import (  # noqa: E402
+    ModelSqlAttribute,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM catalog_database LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.catalog_database.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable: {exc}")
 
 
 def _add(table, **values) -> str:
-    return store().query_write(table.insert().values(**values).returning(table.c.id))[
-        0
-    ]["id"]
+    return insert_returning(table, values, [table.c.id])[0]["id"]
 
 
 def _link(table, **values) -> None:
@@ -507,10 +510,10 @@ def test_an_unresolvable_reference_is_rejected(world) -> None:
 
 
 def test_a_failed_import_leaves_nothing_behind(world) -> None:
-    """The whole import is one transaction — the simplification Phase 10 banked.
+    """A corrupt document is rejected before anything is written.
 
-    A failure anywhere rolls back everything, so an import cannot leave a
-    catalog with half its semantics on top.
+    The import commits in batches, so this is what keeps a document naming an
+    id it does not carry from leaving a catalog with half its semantics on top.
     """
     target = f"{world.prefix}-copy"
     document = _reid(_document(world), target)
@@ -534,6 +537,79 @@ def test_a_failed_import_leaves_nothing_behind(world) -> None:
         )
     finally:
         _cleanup(f"{world.prefix}-copy")
+
+
+def test_a_sql_attribute_naming_a_missing_term_is_rejected_first(world) -> None:
+    target = f"{world.prefix}-copy"
+    document = _reid(_document(world), target)
+    document.data_layer.databases[0].schemas[0].database_name = target
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id=f"{target}-attr", name=f"{target}-attr", sql="SELECT 1", term_id="nope"
+        )
+    )
+
+    try:
+        with pytest.raises(mi.ModelImportValidationError, match="sql attribute term"):
+            mi.apply_import_model(document, replace=False)
+        assert (
+            store().query_read(
+                select(s.catalog_database.c.id).where(
+                    s.catalog_database.c.name == target
+                )
+            )
+            == []
+        )
+    finally:
+        _cleanup(target)
+
+
+def test_an_import_spanning_many_batches_lands_whole(world, monkeypatch) -> None:
+    """Every phase crosses a batch boundary, and the import is the same import."""
+    monkeypatch.setattr(session, "IN_QUERY_BATCH", 2)
+    monkeypatch.setattr(mi, "_DELETE_BATCH", 1)
+    target = f"{world.prefix}-copy"
+    document = _reid(_document(world), target)
+    document.data_layer.databases[0].schemas[0].database_name = target
+
+    try:
+        first = mi.apply_import_model(document, replace=True)
+        copied = store().query_read(
+            select(s.catalog_database.c.id).where(s.catalog_database.c.name == target)
+        )[0]["id"]
+        copied_table = store().query_read(
+            select(s.catalog_table.c.id)
+            .select_from(
+                s.catalog_table.join(
+                    s.catalog_schema,
+                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                )
+            )
+            .where(s.catalog_schema.c.database_id == copied)
+            .limit(1)
+        )[0]["id"]
+        stale = [
+            _add(s.term, name=f"{target}-Stale{i}", source=SEMANTIC_SOURCE)
+            for i in range(3)
+        ]
+        for term_id in stale:
+            _link(s.table__term, table_id=copied_table, term_id=term_id)
+
+        second = mi.apply_import_model(document, replace=True)
+
+        assert first["created"]["columns"] == 3
+        assert first["created"]["column_attributes"] == 1
+        assert sum(second["created"].values()) == 0
+        assert (
+            store().query_read(select(s.term.c.id).where(s.term.c.id.in_(stale))) == []
+        )
+        assert store().query_read(
+            select(s.term.c.id).where(
+                s.term.c.imported_id == document.semantic_layer.terms[0].id
+            )
+        )
+    finally:
+        _cleanup(target)
 
 
 # --------------------------------------------------------------------------

@@ -11,8 +11,8 @@ by the YAML ``id`` against ``imported_id`` *or* the live ``id``, so re-importing
 a document is a no-op and importing onto an existing catalog adopts it rather
 than duplicating it.
 
-The whole import is **one transaction**, so a failure part-way leaves nothing
-behind rather than a catalog with half its semantics on top.
+An import commits in batches, since RonDB caps the operations one transaction
+may hold; :func:`apply_import_model` states what a failure part-way leaves.
 """
 
 from __future__ import annotations
@@ -21,18 +21,16 @@ import logging
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from sqlalchemy import func, literal, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import func, select, true, update
 
 from auto_ontology.catalog.constants import Props
 from auto_ontology.catalog.model import CatalogNode
 from auto_ontology.catalog.store.queries import add_query
 from auto_ontology.dal import schema as s
-from auto_ontology.dal.custom_analyses import (
-    detach_existing_sql_edges as detach_ca_sql_edges,
-)
+from auto_ontology.dal.ops import chunks, upsert
 from auto_ontology.dal.session import store, write_transaction
-from auto_ontology.dal.sql_attributes import detach_existing_sql_edges, link_to_term
+from auto_ontology.dal.sql_attributes import link_to_term
+from auto_ontology.dal.types import new_id
 from auto_ontology.semantic.constants import (
     SEMANTIC_SOURCE,
     SQL_ATTR_SOURCE_BRIDGE,
@@ -71,6 +69,9 @@ from auto_ontology.server.sql_utils import get_dialects, get_schemas, validate_s
 from auto_ontology.utils.sample_values import dump_sample_values, parse_sample_values
 
 logger = logging.getLogger(__name__)
+
+#: Rows deleted per transaction by ``replace``; see :func:`_delete_by_id`.
+_DELETE_BATCH = 200
 
 _SOURCE_TO_YAML_KEY: dict[str, str] = {
     SQL_ATTR_SOURCE_MANUAL: "manual",
@@ -126,7 +127,7 @@ def _database_scope(database_ids: list[str]):
     Reading it the other way would silently export an empty document.
     """
     if not database_ids:
-        return literal(True)
+        return true()
     return s.catalog_database.c.id.in_(list(database_ids))
 
 
@@ -773,82 +774,93 @@ def make_cached_sql_column_resolver() -> Callable[[str, str | None], list[str]]:
 # ---------------------------------------------------------------------------
 
 
+def _find_entities(table, yaml_ids: Iterable[str]) -> dict[str, str]:
+    """``{yaml_id: live_id}`` for the ids *table* already holds.
+
+    Matches on ``imported_id`` **or** the live ``id`` — the second is what makes
+    the first import onto an existing catalog adopt it rather than duplicate it.
+    A row matched by its own id has its ``imported_id`` stamped if it had none,
+    so the *next* import matches it the fast way.
+    """
+    wanted = set(yaml_ids)
+    found: dict[str, str] = {}
+    for batch in chunks(wanted):
+        for row in store().query_read(
+            select(table.c.id, table.c.imported_id).where(
+                table.c.imported_id.in_(batch) | table.c.id.in_(batch)
+            )
+        ):
+            # A row can match by either column. Its own id wins only when
+            # nothing already claimed that payload id by imported_id, so a row
+            # explicitly stamped by a previous import is never shadowed by an
+            # id collision.
+            if row["imported_id"] in wanted:
+                found[row["imported_id"]] = row["id"]
+            elif row["id"] in wanted:
+                found.setdefault(row["id"], row["id"])
+
+    # Only when unset: overwriting would relabel a row another payload owns.
+    adopted = [live_id for yaml_id, live_id in found.items() if live_id == yaml_id]
+    for batch in chunks(adopted):
+        store().query_write(
+            update(table)
+            .where(table.c.id.in_(batch), table.c.imported_id.is_(None))
+            .values(imported_id=table.c.id)
+        )
+    return found
+
+
+def _create_entities(table, items: list[tuple[str, dict[str, Any]]]) -> dict[str, str]:
+    """Insert each ``(yaml_id, props)`` with a fresh id and ``imported_id = yaml_id``."""
+    rows = [
+        {**props, "id": new_id(), "imported_id": yaml_id} for yaml_id, props in items
+    ]
+    for batch in chunks(rows):
+        store().query_write(table.insert().values(batch))
+    return {row["imported_id"]: row["id"] for row in rows}
+
+
 def _resolve_entities_batch(
     table,
     items: list[tuple[str, dict[str, Any]]],
 ) -> dict[str, tuple[str, bool]]:
-    """``{yaml_id: (live_id, created)}`` for a whole same-table batch.
-
-    Matches on ``imported_id`` **or** the live ``id`` — the second is what makes
-    the first import onto an existing catalog adopt it rather than duplicate it.
-    A row found this way has its ``imported_id`` stamped if it had none, so the
-    *next* import matches it the fast way.
-
-    Three statements regardless of batch size — one ``INSERT ... RETURNING``
-    rather than a create per row.
-    """
-    if not items:
-        return {}
-
+    """``{yaml_id: (live_id, created)}``: :func:`_find_entities`, then create the rest."""
     # Duplicate YAML ids within one batch: keep the first create_props, which is
     # what repeated sequential calls did -- the first creates, the rest find.
     deduped: dict[str, dict[str, Any]] = {}
     for imported_id, create_props in items:
         deduped.setdefault(imported_id, create_props)
-    imported_ids = list(deduped)
 
-    existing: dict[str, str] = {}
-    for row in store().query_read(
-        select(table.c.id, table.c.imported_id).where(
-            table.c.imported_id.in_(imported_ids) | table.c.id.in_(imported_ids)
-        )
-    ):
-        # A row can match by either column. Its own id wins only when nothing
-        # already claimed that payload id by imported_id, so a row explicitly
-        # stamped by a previous import is never shadowed by an id collision.
-        if row["imported_id"] in deduped:
-            existing[row["imported_id"]] = row["id"]
-        elif row["id"] in deduped:
-            existing.setdefault(row["id"], row["id"])
-
-    result: dict[str, tuple[str, bool]] = {}
-    to_create: list[tuple[str, dict[str, Any]]] = []
-    for imported_id, create_props in deduped.items():
-        live_id = existing.get(imported_id)
-        if live_id is None:
-            to_create.append((imported_id, dict(create_props or {})))
-            continue
-        result[imported_id] = (live_id, False)
-        # Stamp it so the *next* import matches by imported_id directly. Only
-        # when unset -- overwriting would relabel a row another payload owns.
-        store().query_write(
-            update(table)
-            .where(table.c.id == live_id, table.c.imported_id.is_(None))
-            .values(imported_id=imported_id)
-        )
-
-    if to_create:
-        rows = store().query_write(
-            insert(table)
-            .values(
-                [
-                    {**props, "imported_id": imported_id}
-                    for imported_id, props in to_create
-                ]
-            )
-            .returning(table.c.id, table.c.imported_id)
-        )
-        for row in rows:
-            result[row["imported_id"]] = (row["id"], True)
-
-    return result
+    found = _find_entities(table, deduped)
+    created = _create_entities(
+        table,
+        [
+            (yaml_id, props)
+            for yaml_id, props in deduped.items()
+            if yaml_id not in found
+        ],
+    )
+    return {
+        **{yaml_id: (live_id, False) for yaml_id, live_id in found.items()},
+        **{yaml_id: (live_id, True) for yaml_id, live_id in created.items()},
+    }
 
 
 def _link(table, rows: list[dict[str, Any]]) -> None:
-    """Idempotent link-table insert; ``[]`` is a no-op, not an empty INSERT."""
-    if not rows:
-        return
-    store().query_write(insert(table).values(rows).on_conflict_do_nothing())
+    """Idempotent link-table insert; an existing row is left as it is."""
+    key = [column.name for column in table.primary_key.columns]
+    for batch in chunks(rows):
+        upsert(table, batch, key=key)
+
+
+def _delete_by_id(table, ids: list[str]) -> None:
+    """Delete rows by id, :data:`_DELETE_BATCH` per transaction.
+
+    Small because every row ``ON DELETE CASCADE`` removes with them counts
+    toward RonDB's per-transaction operation limit too.
+    """
+    for batch in chunks(ids, _DELETE_BATCH):
+        store().query_write(table.delete().where(table.c.id.in_(batch)))
 
 
 def _payload_identity(table):
@@ -862,13 +874,50 @@ def _payload_identity(table):
     return func.coalesce(table.c.imported_id, table.c.id)
 
 
-def _remap(id_map: dict[str, str], yaml_id: str, *, kind: str) -> str:
-    live_id = id_map.get(yaml_id)
-    if not live_id:
-        raise ModelImportValidationError(
-            f"Cannot resolve {kind} id {yaml_id!r} — missing from catalog/semantic import",
-        )
-    return live_id
+def _validate_references(document: AutoOntologyModelDocument) -> None:
+    """Raise :class:`ModelImportValidationError` for a structural reference to an
+    id the document does not carry.
+
+    Run before anything is written, so a corrupt document changes nothing. A
+    foreign key's endpoints, a join's tables, the column a column attribute
+    sits on and the term a SQL attribute belongs to are structural. The ids
+    :func:`_remap_optional` resolves are not.
+    """
+    table_ids, column_ids = _catalog_ids(document.data_layer.databases)
+    term_ids = {term.id for term in document.semantic_layer.terms}
+    references = [
+        *(
+            (yaml_id, column_ids, kind)
+            for fk in document.data_layer.foreign_keys
+            for yaml_id, kind in (
+                (fk.source_column_id, "foreign-key source column"),
+                (fk.target_column_id, "foreign-key target column"),
+            )
+        ),
+        *(
+            (yaml_id, table_ids, kind)
+            for join in document.data_layer.joins
+            for yaml_id, kind in (
+                (join.source_table_id, "join source table"),
+                (join.target_table_id, "join target table"),
+            )
+        ),
+        *(
+            (attr.column_id, column_ids, "column attribute column")
+            for term in document.semantic_layer.terms
+            for attr in term.columns_attributes
+        ),
+        *(
+            (attr.term_id, term_ids, "sql attribute term")
+            for key in _YAML_SOURCE_KEYS
+            for attr in getattr(document.semantic_layer.sql_attributes, key)
+        ),
+    ]
+    for yaml_id, known, kind in references:
+        if yaml_id not in known:
+            raise ModelImportValidationError(
+                f"Cannot resolve {kind} id {yaml_id!r} — missing from catalog/semantic import",
+            )
 
 
 def _remap_optional(id_map: dict[str, str], yaml_id: str) -> str | None:
@@ -877,69 +926,69 @@ def _remap_optional(id_map: dict[str, str], yaml_id: str) -> str | None:
     A scoped export is deliberately honest about the parts of a term it does not
     own: ``_export_terms`` emits *every* table representing a term, in scope or
     not, and ``_export_semantic_fks`` every pair touching an in-scope column.
-    Those ids point outside the document by design, so requiring them -- as
-    :func:`_remap` does -- made any such document abort the whole import.
+    Those ids point outside the document by design, so requiring them made any
+    such document abort the whole import.
 
-    Structural references still use :func:`_remap`. The difference is what a
-    missing id means: for a foreign key's endpoints it is a corrupt document,
-    for these it is the expected shape of a partial export.
+    Structural references are checked by :func:`_validate_references` instead.
+    The difference is what a missing id means: for a foreign key's endpoints it
+    is a corrupt document, for these it is the expected shape of a partial
+    export.
     """
     return id_map.get(yaml_id)
 
 
 def _database_names_for_terms(term_ids: list[str]) -> dict[str, str]:
-    if not term_ids:
-        return {}
     names: dict[str, str] = {}
-    for row in store().query_read(
-        select(
-            s.table__term.c.term_id,
-            s.catalog_database.c.name.label("database_name"),
-        )
-        .select_from(
-            s.table__term.join(
-                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
+    for batch in chunks(term_ids):
+        for row in store().query_read(
+            select(
+                s.table__term.c.term_id,
+                s.catalog_database.c.name.label("database_name"),
             )
-            .join(
-                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            .select_from(
+                s.table__term.join(
+                    s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
+                )
+                .join(
+                    s.catalog_schema,
+                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                )
+                .join(
+                    s.catalog_database,
+                    s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                )
             )
-            .join(
-                s.catalog_database,
-                s.catalog_database.c.id == s.catalog_schema.c.database_id,
-            )
-        )
-        .where(s.table__term.c.term_id.in_(term_ids))
-        .order_by(s.catalog_database.c.id)
-    ):
-        names.setdefault(row["term_id"], row["database_name"])
+            .where(s.table__term.c.term_id.in_(batch))
+            .order_by(s.catalog_database.c.id)
+        ):
+            names.setdefault(row["term_id"], row["database_name"])
     return names
 
 
 def _database_names_for_columns(column_ids: list[str]) -> dict[str, str]:
-    if not column_ids:
-        return {}
     names: dict[str, str] = {}
-    for row in store().query_read(
-        select(
-            s.catalog_column.c.id.label("column_id"),
-            s.catalog_database.c.name.label("database_name"),
-        )
-        .select_from(
-            s.catalog_column.join(
-                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+    for batch in chunks(column_ids):
+        for row in store().query_read(
+            select(
+                s.catalog_column.c.id.label("column_id"),
+                s.catalog_database.c.name.label("database_name"),
             )
-            .join(
-                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            .select_from(
+                s.catalog_column.join(
+                    s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+                )
+                .join(
+                    s.catalog_schema,
+                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                )
+                .join(
+                    s.catalog_database,
+                    s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                )
             )
-            .join(
-                s.catalog_database,
-                s.catalog_database.c.id == s.catalog_schema.c.database_id,
-            )
-        )
-        .where(s.catalog_column.c.id.in_(column_ids))
-        .order_by(s.catalog_database.c.id)
-    ):
-        names.setdefault(row["column_id"], row["database_name"])
+            .where(s.catalog_column.c.id.in_(batch))
+        ):
+            names.setdefault(row["column_id"], row["database_name"])
     return names
 
 
@@ -956,9 +1005,15 @@ def apply_import_model(
     Catalog rows are created when missing, so an import works against an empty
     store.
 
-    **The whole import is one transaction**, SQL attributes and analyses
-    included, so a failure part-way leaves nothing behind rather than a catalog
-    with half its semantics on top.
+    Raises :class:`ModelImportValidationError` before writing anything when a
+    structural reference names an id the document does not carry.
+
+    Writes commit in batches, because RonDB caps the operations one transaction
+    may hold. Each SQL attribute and custom analysis lands in one transaction
+    with its statement. A failure part-way through (a database error, a
+    statement that no longer parses against the catalog) keeps what was
+    already written; re-importing the same document completes it, but does
+    not re-buffer embeddings for the rows the failed run created.
     """
     id_map: dict[str, str] = {}
     column_meta: dict[str, ColumnCatalogMeta] = {}
@@ -976,25 +1031,25 @@ def apply_import_model(
     term_names = {term.id: term.name for term in document.semantic_layer.terms}
     schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]] = {}
 
-    with write_transaction():
-        live_db_ids = _import_catalog(
-            document, id_map, created, skipped, embed_buffer, column_meta
-        )
-        if replace:
-            _delete_scoped_semantics_not_in_payload(document, live_db_ids)
-        _import_foreign_keys(document, id_map)
-        _import_joins(document, id_map)
-        _import_terms(document, id_map, created, skipped, embed_buffer)
-        _import_column_attributes(
-            document, id_map, created, skipped, embed_buffer, column_meta
-        )
-        _import_semantic_fks(document, id_map)
-        _import_sql_attributes(
-            document, id_map, created, skipped, embed_buffer, term_names, schema_cache
-        )
-        _import_custom_analyses(
-            document, id_map, created, skipped, embed_buffer, schema_cache
-        )
+    _validate_references(document)
+    live_db_ids = _import_catalog(
+        document, id_map, created, skipped, embed_buffer, column_meta
+    )
+    if replace:
+        _delete_scoped_semantics_not_in_payload(document, live_db_ids)
+    _import_foreign_keys(document, id_map)
+    _import_joins(document, id_map)
+    _import_terms(document, id_map, created, skipped, embed_buffer)
+    _import_column_attributes(
+        document, id_map, created, skipped, embed_buffer, column_meta
+    )
+    _import_semantic_fks(document, id_map)
+    _import_sql_attributes(
+        document, id_map, created, skipped, embed_buffer, term_names, schema_cache
+    )
+    _import_custom_analyses(
+        document, id_map, created, skipped, embed_buffer, schema_cache
+    )
 
     summary: dict[str, Any] = {
         "database_ids": live_db_ids,
@@ -1181,12 +1236,8 @@ def _import_foreign_keys(
         s.column__foreign_key,
         [
             {
-                "source_column_id": _remap(
-                    id_map, fk.source_column_id, kind="foreign-key source column"
-                ),
-                "target_column_id": _remap(
-                    id_map, fk.target_column_id, kind="foreign-key target column"
-                ),
+                "source_column_id": id_map[fk.source_column_id],
+                "target_column_id": id_map[fk.target_column_id],
             }
             for fk in document.data_layer.foreign_keys
         ],
@@ -1196,28 +1247,19 @@ def _import_foreign_keys(
 def _import_joins(document: AutoOntologyModelDocument, id_map: dict[str, str]) -> None:
     rows = [
         {
-            "source_table_id": _remap(
-                id_map, join.source_table_id, kind="join source table"
-            ),
-            "target_table_id": _remap(
-                id_map, join.target_table_id, kind="join target table"
-            ),
+            "source_table_id": id_map[join.source_table_id],
+            "target_table_id": id_map[join.target_table_id],
             "join_columns": join.join_columns,
         }
         for join in document.data_layer.joins
     ]
-    if not rows:
-        return
-    statement = insert(s.table__join).values(rows)
-    store().query_write(
-        statement.on_conflict_do_update(
-            index_elements=[
-                s.table__join.c.source_table_id,
-                s.table__join.c.target_table_id,
-            ],
-            set_={"join_columns": statement.excluded.join_columns},
+    for batch in chunks(rows):
+        upsert(
+            s.table__join,
+            batch,
+            key=("source_table_id", "target_table_id"),
+            set_=lambda inserted: {"join_columns": inserted.join_columns},
         )
-    )
 
 
 def _delete_scoped_semantics_not_in_payload(
@@ -1282,23 +1324,16 @@ def _delete_scoped_semantics_not_in_payload(
             .where(s.sql_query__table.c.table_id.in_(scoped_tables))
             .distinct()
         )
-        store().query_write(
-            owner_table.delete().where(
-                owner_table.c.id.in_(in_scope),
-                _payload_identity(owner_table).notin_(keep or [""]),
-            )
+        _delete_stale(
+            owner_table,
+            owner_table.c.id.in_(in_scope),
+            _payload_identity(owner_table).notin_(keep or [""]),
         )
 
-    attribute_in_scope = (
-        select(s.column_attribute.c.id)
-        .where(s.column_attribute.c.table_id.in_(scoped_tables))
-        .distinct()
-    )
-    store().query_write(
-        s.column_attribute.delete().where(
-            s.column_attribute.c.id.in_(attribute_in_scope),
-            _payload_identity(s.column_attribute).notin_(keep_attrs or [""]),
-        )
+    _delete_stale(
+        s.column_attribute,
+        s.column_attribute.c.table_id.in_(scoped_tables),
+        _payload_identity(s.column_attribute).notin_(keep_attrs or [""]),
     )
 
     # Only terms whose every representing table is inside this import.
@@ -1312,14 +1347,18 @@ def _delete_scoped_semantics_not_in_payload(
         .where(s.table__term.c.table_id.in_(scoped_tables))
         .distinct()
     )
-    store().query_write(
-        s.term.delete().where(
-            s.term.c.id.in_(inside),
-            s.term.c.id.notin_(outside),
-            s.term.c.source == SEMANTIC_SOURCE,
-            _payload_identity(s.term).notin_(keep_terms or [""]),
-        )
+    _delete_stale(
+        s.term,
+        s.term.c.id.in_(inside),
+        s.term.c.id.notin_(outside),
+        s.term.c.source == SEMANTIC_SOURCE,
+        _payload_identity(s.term).notin_(keep_terms or [""]),
     )
+
+
+def _delete_stale(table, *where: Any) -> None:
+    ids = [row["id"] for row in store().query_read(select(table.c.id).where(*where))]
+    _delete_by_id(table, ids)
 
 
 def _import_terms(
@@ -1355,22 +1394,6 @@ def _import_terms(
             newly_created.append(live_term_id)
         else:
             skipped["terms"] += 1
-        # The payload is authoritative about which tables represent a term --
-        # but only for the tables it carries. Scoped to those, so a term also
-        # represented in a database outside this export keeps that link: the
-        # unscoped delete removed it and the re-insert could not restore it,
-        # because the id does not resolve. Before out-of-scope references were
-        # skipped rather than rejected this could not happen, since such a
-        # document aborted the import outright.
-        # `id_map.values()` is every live id this document resolved. Only table
-        # ids can match `table_id`, so the wider list is harmless and avoids
-        # threading the document's table set through here.
-        store().query_write(
-            s.table__term.delete().where(
-                s.table__term.c.term_id == live_term_id,
-                s.table__term.c.table_id.in_(list(id_map.values())),
-            )
-        )
         for table_id in term.represents:
             live_table_id = _remap_optional(id_map, table_id)
             if live_table_id is None:
@@ -1383,6 +1406,21 @@ def _import_terms(
                 )
                 continue
             represents_rows.append({"term_id": live_term_id, "table_id": live_table_id})
+
+    # The payload is authoritative about which tables represent a term, but
+    # only for the tables it carries. A term also represented in a database
+    # outside this document keeps that link, which the document could not
+    # restore because the id does not resolve.
+    yaml_table_ids, _ = _catalog_ids(document.data_layer.databases)
+    document_tables = [id_map[table_id] for table_id in yaml_table_ids]
+    for term_batch in chunks(term_results[term.id][0] for term in terms):
+        for table_batch in chunks(document_tables):
+            store().query_write(
+                s.table__term.delete().where(
+                    s.table__term.c.term_id.in_(term_batch),
+                    s.table__term.c.table_id.in_(table_batch),
+                )
+            )
     _link(s.table__term, represents_rows)
 
     if embed_buffer is not None and newly_created:
@@ -1413,18 +1451,14 @@ def _import_column_attributes(
     context: dict[str, dict[str, Any]] = {}
 
     for term in document.semantic_layer.terms:
-        live_term_id = _remap(id_map, term.id, kind="term")
+        live_term_id = id_map[term.id]
         for attr in term.columns_attributes:
             col_ctx = column_meta.get(attr.column_id)
             # Deliberately '' when the column is unknown: the schema keeps
             # table_id NOT NULL but not a foreign key, exactly so this import
             # stays legal. Bound once here because the embedding context needs
             # the same value -- computing it twice is how the two drifted apart.
-            live_table_id = (
-                _remap(id_map, col_ctx.table_yaml_id, kind="column attribute table")
-                if col_ctx
-                else ""
-            )
+            live_table_id = id_map[col_ctx.table_yaml_id] if col_ctx else ""
             attr_items.append(
                 (
                     attr.id,
@@ -1458,9 +1492,7 @@ def _import_column_attributes(
 
         has_attribute_rows.append(
             {
-                "column_id": _remap(
-                    id_map, attr.column_id, kind="column attribute column"
-                ),
+                "column_id": id_map[attr.column_id],
                 "attribute_id": live_attr_id,
             }
         )
@@ -1510,18 +1542,12 @@ def _import_semantic_fks(
                 "use_in_join_paths": fk.use_in_join_paths,
             }
         )
-    if rows:
-        statement = insert(s.column__semantic_fk).values(rows)
-        store().query_write(
-            statement.on_conflict_do_update(
-                index_elements=[
-                    s.column__semantic_fk.c.column_id,
-                    s.column__semantic_fk.c.attribute_id,
-                ],
-                set_={
-                    "use_in_join_paths": statement.excluded.use_in_join_paths,
-                },
-            )
+    for batch in chunks(rows):
+        upsert(
+            s.column__semantic_fk,
+            batch,
+            key=("column_id", "attribute_id"),
+            set_=lambda inserted: {"use_in_join_paths": inserted.use_in_join_paths},
         )
 
 
@@ -1620,55 +1646,46 @@ def _import_sql_attributes(
         for key in _YAML_SOURCE_KEYS
         for attr in getattr(document.semantic_layer.sql_attributes, key)
     ]
-    attr_results = _resolve_entities_batch(
-        s.sql_attribute,
-        [
-            (
-                attr.id,
-                {
-                    "name": attr.name,
-                    "description": attr.description,
-                    "expression": attr.sql,
-                    "source": source,
-                },
-            )
-            for source, attr in grouped
-        ],
-    )
-    for _source, attr in grouped:
-        id_map[attr.id] = attr_results[attr.id][0]
-
-    # SQL parsing is inherently per-item, but the resolve and the database-name
-    # lookups it needs are batched up front.
-    newly_created_terms = list(
-        {
-            _remap(id_map, attr.term_id, kind="sql attribute term")
-            for _source, attr in grouped
-            if attr_results[attr.id][1]
-        }
-    )
-    db_names = _database_names_for_terms(newly_created_terms)
-
+    found = _find_entities(s.sql_attribute, (attr.id for _source, attr in grouped))
+    id_map.update(found)
+    pending: dict[str, tuple[str, ModelSqlAttribute]] = {}
     for source, attr in grouped:
-        live_attr_id, was_created = attr_results[attr.id]
-        if not was_created:
+        if attr.id in found or attr.id in pending:
             skipped["sql_attributes"] += 1
-            continue
-        created["sql_attributes"] += 1
-        live_term_id = _remap(id_map, attr.term_id, kind="sql attribute term")
+        else:
+            pending[attr.id] = (source, attr)
+    db_names = _database_names_for_terms(
+        list({id_map[attr.term_id] for _source, attr in pending.values()})
+    )
+
+    for source, attr in pending.values():
+        live_term_id = id_map[attr.term_id]
         database_name = db_names.get(live_term_id)
-        detach_existing_sql_edges(live_attr_id)
-        _persist_sql_object(
-            node_label="SqlAttribute",
-            node_id=live_attr_id,
-            name=attr.name,
-            description=attr.description,
-            sql=attr.sql,
-            database_name=database_name,
-            schema_cache=schema_cache,
-            extra_props={"expression": attr.sql, "source": source},
-        )
-        link_to_term(live_attr_id, live_term_id)
+        props = {
+            "name": attr.name,
+            "description": attr.description,
+            "expression": attr.sql,
+            "source": source,
+        }
+        # One transaction per attribute: committed without its statement, a
+        # re-import would find the row and never parse the SQL again.
+        with write_transaction():
+            live_attr_id = _create_entities(s.sql_attribute, [(attr.id, props)])[
+                attr.id
+            ]
+            _persist_sql_object(
+                node_label="SqlAttribute",
+                node_id=live_attr_id,
+                name=attr.name,
+                description=attr.description,
+                sql=attr.sql,
+                database_name=database_name,
+                schema_cache=schema_cache,
+                extra_props={"expression": attr.sql, "source": source},
+            )
+            link_to_term(live_attr_id, live_term_id)
+        id_map[attr.id] = live_attr_id
+        created["sql_attributes"] += 1
         if embed_buffer is not None:
             embed_buffer.semantic_rows.append(
                 build_sql_attribute_semantic_row(
@@ -1691,52 +1708,44 @@ def _import_custom_analyses(
     schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]],
 ) -> None:
     analyses = document.semantic_layer.custom_analyses
-    results = _resolve_entities_batch(
-        s.custom_analysis,
-        [
-            (analysis.id, {"name": analysis.name, "description": analysis.description})
-            for analysis in analyses
-        ],
-    )
+    found = _find_entities(s.custom_analysis, (analysis.id for analysis in analyses))
+    id_map.update(found)
+    pending: dict[str, ModelCustomAnalysis] = {}
     for analysis in analyses:
-        id_map[analysis.id] = results[analysis.id][0]
-
-    live_column: dict[str, str | None] = {}
-    lookup_ids: list[str] = []
-    for analysis in analyses:
-        _live_id, was_created = results[analysis.id]
-        column_id: str | None = None
-        if was_created and analysis.sql_column_is:
-            try:
-                column_id = _remap(
-                    id_map, analysis.sql_column_is[0], kind="custom analysis column"
-                )
-            except ModelImportValidationError:
-                column_id = None
-        live_column[analysis.id] = column_id
-        if column_id:
-            lookup_ids.append(column_id)
-
-    db_names = _database_names_for_columns(lookup_ids)
-
-    for analysis in analyses:
-        live_ca_id, was_created = results[analysis.id]
-        if not was_created:
+        if analysis.id in found or analysis.id in pending:
             skipped["custom_analyses"] += 1
-            continue
-        created["custom_analyses"] += 1
-        column_id = live_column.get(analysis.id)
+        else:
+            pending[analysis.id] = analysis
+    live_column = {
+        analysis.id: _remap_optional(id_map, analysis.sql_column_is[0])
+        if analysis.sql_column_is
+        else None
+        for analysis in pending.values()
+    }
+    db_names = _database_names_for_columns(
+        [column_id for column_id in live_column.values() if column_id]
+    )
+
+    for analysis in pending.values():
+        column_id = live_column[analysis.id]
         database_name = db_names.get(column_id) if column_id else None
-        detach_ca_sql_edges(live_ca_id)
-        _persist_sql_object(
-            node_label="CustomAnalysis",
-            node_id=live_ca_id,
-            name=analysis.name,
-            description=analysis.description,
-            sql=analysis.sql,
-            database_name=database_name,
-            schema_cache=schema_cache,
-        )
+        props = {"name": analysis.name, "description": analysis.description}
+        # One transaction per analysis, for the reason given on SQL attributes.
+        with write_transaction():
+            live_ca_id = _create_entities(s.custom_analysis, [(analysis.id, props)])[
+                analysis.id
+            ]
+            _persist_sql_object(
+                node_label="CustomAnalysis",
+                node_id=live_ca_id,
+                name=analysis.name,
+                description=analysis.description,
+                sql=analysis.sql,
+                database_name=database_name,
+                schema_cache=schema_cache,
+            )
+        id_map[analysis.id] = live_ca_id
+        created["custom_analyses"] += 1
         if embed_buffer is not None:
             embed_buffer.semantic_rows.append(
                 build_custom_analysis_semantic_row(

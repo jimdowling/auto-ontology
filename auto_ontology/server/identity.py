@@ -1,34 +1,27 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Read identities forwarded by the trusted private Next.js gateway.
+"""The caller's name, for routers that record who did something.
 
-Lives at the top of ``auto_ontology.server`` rather than under ``chat``, where it started:
-the header is a property of the gateway every router sits behind, and chat was
-only the first feature to need a caller's name. Tags read it too, to record who
-created and last renamed one.
+The name is the Hopsworks username that :class:`auto_ontology.server.authz.IdentityMiddleware`
+verified from the app proxy's signature.
 """
 
 from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
-INTERNAL_USER_HEADER = "x-auto-ontology-user-id"
-
 
 def resolve_internal_user(request: Request, *, required: bool) -> str | None:
-    """Return the Auto Ontology user id supplied by the trusted private gateway.
+    """The verified caller's username.
 
-    Direct callers that do not use conversation persistence may omit these
-    headers. FastAPI must not be publicly reachable because the header is not
-    independently authenticated here.
+    ``None`` when the request carries no verified caller and ``required`` is
+    False; raises 401 when ``required`` is True.
     """
-
-    user_id = (request.headers.get(INTERNAL_USER_HEADER) or "").strip()
-    if user_id:
-        return user_id
-
+    caller = getattr(request.state, "caller", None)
+    if caller is not None:
+        return caller.username
     if required:
         raise HTTPException(
             status_code=401, detail="Authenticated conversation required"
@@ -36,7 +29,4 @@ def resolve_internal_user(request: Request, *, required: bool) -> str | None:
     return None
 
 
-__all__ = [
-    "INTERNAL_USER_HEADER",
-    "resolve_internal_user",
-]
+__all__ = ["resolve_internal_user"]

@@ -65,16 +65,16 @@ def _describe(obj: Any) -> str:
         return "callable(?)"
 
 
-#: ``<... object at 0x7f...>`` — a default argument that is an object without a
-#: ``__repr__`` renders its address, which differs every process. A snapshot
-#: containing one can never match itself, so the address is normalised away and
-#: the type name kept. ``sql_fragments`` defaults to a ``Table``, whose repr is
-#: full of these.
-_ADDRESS = re.compile(r" object at 0x[0-9a-f]+")
+#: ``<... object at 0x7f...>``, ``<function new_id at 0x7f...>`` — a default
+#: argument without its own ``__repr__`` renders its address, which differs
+#: every process. A snapshot containing one can never match itself, so the
+#: address is normalised away and the name kept. ``sql_fragments`` defaults to a
+#: ``Table``, whose repr is full of these.
+_ADDRESS = re.compile(r" at 0x[0-9a-f]+")
 
 
 def _stable(signature: str) -> str:
-    return _ADDRESS.sub(" object", signature)
+    return _ADDRESS.sub("", signature)
 
 
 def _public_surface(module: Any) -> dict[str, str]:

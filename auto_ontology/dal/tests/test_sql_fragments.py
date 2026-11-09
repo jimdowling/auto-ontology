@@ -29,6 +29,7 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy import select  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.ops import insert_returning  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.dal.sql_fragments import (  # noqa: E402
     column_description_expr,
@@ -38,18 +39,16 @@ from auto_ontology.dal.sql_fragments import (  # noqa: E402
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM column_attribute LIMIT 1")
+        store().query_read(select(s.column_attribute.c.id).limit(1))
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable (migrations not applied): {exc}")
 
 
 def _insert(table, **values):
-    return store().query_write(table.insert().values(**values).returning(table.c.id))[
-        0
-    ]["id"]
+    return insert_returning(table, values, [table.c.id])[0]["id"]
 
 
 @pytest.fixture

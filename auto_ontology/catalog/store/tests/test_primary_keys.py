@@ -15,26 +15,24 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-pytest.importorskip("psycopg")
+from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
-from sqlalchemy import select  # noqa: E402
-from sqlalchemy.exc import OperationalError  # noqa: E402
-
-from auto_ontology.catalog.store.rows import upsert_row  # noqa: E402
-from auto_ontology.catalog.write import populate_pks  # noqa: E402
-from auto_ontology.connectors.sqlite import SQLiteDatabase  # noqa: E402
-from auto_ontology.dal import schema as s  # noqa: E402
-from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.catalog.store.rows import upsert_row
+from auto_ontology.catalog.write import populate_pks
+from auto_ontology.connectors.sqlite import SQLiteDatabase
+from auto_ontology.dal import schema as s
+from auto_ontology.dal.session import store
 
 _PK_COLUMNS = ["table_schema", "table_name", "column_name", "ordinal_position"]
 
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema() -> None:
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM catalog_database LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.catalog_database.name} LIMIT 1")
     except OperationalError as exc:
         pytest.skip(f"catalog database not reachable: {exc}")
 

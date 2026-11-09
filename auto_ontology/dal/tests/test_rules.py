@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Rules on Postgres: the saved search, and the tags it applies.
+"""Rules: the saved search, and the tags it applies.
 
 Concentrated on the parts of a rule that are not a plain row.
 
@@ -57,9 +57,11 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
+from sqlalchemy import select  # noqa: E402
 from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.ops import insert_returning  # noqa: E402
 from auto_ontology.dal.rules import (  # noqa: E402
     count_rules,
     create_rule,
@@ -82,12 +84,12 @@ FILTERS = {"description": False, "synonyms": True, "objects": None}
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM rule__tag LIMIT 1")
+        store().query_read(select(s.rule__tag.c.tag_id).limit(1))
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable (migrations not applied): {exc}")
 
 
 @pytest.fixture
@@ -128,9 +130,7 @@ def _term(prefix: str) -> str:
     kinds would need a database, schema and table above them to be reached, and
     what these tests care about is only whether a label exists.
     """
-    return store().query_write(
-        s.term.insert().values(name=f"{prefix}-Order").returning(s.term.c.id)
-    )[0]["id"]
+    return insert_returning(s.term, {"name": f"{prefix}-Order"}, [s.term.c.id])[0]["id"]
 
 
 def test_a_saved_rule_reads_back_with_what_it_was_given(prefix) -> None:

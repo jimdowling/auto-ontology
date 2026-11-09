@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from auto_ontology.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
+from auto_ontology.server import capacity
 from auto_ontology.server.metadata import service as dal
 from auto_ontology.server.responses import EntityCoverageResponse
 
@@ -38,13 +39,15 @@ def entity_coverage(body: EntityCoverageRequest) -> dict:
     by vector distance, enriches from the catalog, and grades how many entities have
     at least one covering ColumnAttribute candidate.
 
-    Returns 422 when the flow cannot produce a result for the question.
+    Returns 422 when the flow cannot produce a result for the question, and
+    429 when the app is already serving its cap of agent runs.
     """
     try:
-        result = dal.entity_coverage(
-            body.question,
-            max_distance=body.max_distance,
-        )
+        with capacity.run_slot():
+            result = dal.entity_coverage(
+                body.question,
+                max_distance=body.max_distance,
+            )
     except dal.PredictionFlowError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": result}

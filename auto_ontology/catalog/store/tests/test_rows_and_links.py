@@ -2,19 +2,16 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The generic node/edge layer the rest of the Postgres write path sits on.
+"""The generic node/edge layer the rest of the catalog write path sits on.
 
-Tested directly rather than through the selector, because the remaining store
-modules do not have Postgres implementations yet — this is the foundation, and
-it needs to be right before anything is built on it.
+Tested directly rather than through the ingest, because this is the
+foundation, and it needs to be right before anything is built on it.
 
 The cases that matter are the ones where the property-graph assumption and the
 relational schema disagree: ``CONTAINS`` being a parent column rather than a
 row, and the parser's id winning on match so ids stay stable across re-ingests.
 
-Needs a migrated database and skips without one::
-
-    uv run alembic upgrade head
+Needs a store and skips without one; see :mod:`auto_ontology.conftest`.
 """
 
 from __future__ import annotations
@@ -39,14 +36,12 @@ from auto_ontology.dal.session import store  # noqa: E402
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM catalog_database LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.catalog_database.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(
-            f"auto_ontology schema unavailable (run alembic upgrade head): {exc}"
-        )
+        pytest.skip(f"auto_ontology schema unavailable: {exc}")
 
 
 @pytest.fixture(autouse=True)

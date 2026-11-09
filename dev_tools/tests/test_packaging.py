@@ -27,6 +27,7 @@ def test_wheel_contains_the_permission_resource(tmp_path: Path) -> None:
 
     with ZipFile(wheels[0]) as wheel:
         packaged = wheel.read(PERMISSION_RESOURCE)
+        routes = wheel.read("auto_ontology/server/route_permissions.json")
 
-    source = (ROOT / "frontend" / "auth" / "access.json").read_bytes()
-    assert packaged == source
+    assert packaged == (ROOT / PERMISSION_RESOURCE).read_bytes()
+    assert routes == (ROOT / "auto_ontology/server/route_permissions.json").read_bytes()

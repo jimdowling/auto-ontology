@@ -2,12 +2,9 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""API route for triggering semantic compilation on the ingestion service.
+"""API routes that run, reset and report semantic compilation.
 
-The settings UI stores the on/off flag directly in Postgres (via Prisma); these
-routes only relay the "run it now" and "reset the layer" requests to the
-ingestion service, mirroring how connection changes trigger ingest (see
-``connections/service.py``).
+Running and resetting start the ontology's compile and reset jobs.
 """
 
 from __future__ import annotations
@@ -37,7 +34,7 @@ router = APIRouter()
     "/semantic-compilation/trigger", status_code=202, response_model=StatusResponse
 )
 async def trigger() -> dict[str, str]:
-    """Ask the ingestion service to run (and schedule) semantic compilation."""
+    """Start a compile run now, unless one is already queued or running."""
     trigger_semantic_compile()
     return {"status": "accepted"}
 
@@ -46,10 +43,10 @@ async def trigger() -> dict[str, str]:
     "/semantic-compilation/reset", status_code=202, response_model=StatusResponse
 )
 async def reset() -> dict[str, str]:
-    """Ask the ingestion service to rebuild every database's semantic layer.
+    """Start the reset job for every database's semantic layer.
 
-    The service deletes the semantic nodes and embeddings and compiles them
-    again, so the layer is rebuilt without waiting for the next scheduled run.
+    The job deletes the semantic rows and vectors and compiles them again, so
+    the layer is rebuilt without waiting for the next scheduled run.
     """
     trigger_semantic_reset()
     return {"status": "accepted"}
@@ -58,15 +55,12 @@ async def reset() -> dict[str, str]:
 @router.get("/semantic-compilation/status", response_model=SemanticStatusResponse)
 def semantic_status() -> dict[str, bool | str | None]:
     """Report whether the semantic layer has been calculated (any Term exists),
-    whether the ingestion service is compiling it right now, when the last
-    pass completed successfully, and when it last failed.
+    whether a compile job is queued or running, when the last pass completed
+    successfully, and when it last failed.
 
-    ``running`` needs the live ingestion process, so it goes through the HTTP
-    proxy and degrades to ``False`` if that's unreachable. ``last_success_at``
-    and ``last_failure_at`` are read straight from the ``semantic_compilation_history``
-    table instead — a temporarily unreachable ingestion service has no bearing
-    on Postgres, so history stays visible even while it's down (see
-    ``auto_ontology/server/ingestion/proxy.py``).
+    ``running`` reads the compile job's executions and degrades to ``False``
+    when Hopsworks cannot be asked; the timestamps come from the
+    ``semantic_compilation_history`` table.
     """
     return {
         "calculated": semantic_layer_calculated(),

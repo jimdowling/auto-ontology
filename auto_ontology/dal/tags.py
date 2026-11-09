@@ -6,7 +6,8 @@
 
 One thing here is less obvious than it looks: **a tag name is unique
 case-insensitively on the trimmed name**, and unlike ``zone.name`` that rule is
-a real database constraint — ``uq_tag_name_lower`` in ``auto_ontology/dal/schema.py``.
+a real database constraint — ``uq_tag_name_lower`` over the stored
+``name_key`` in ``auto_ontology/dal/schema.py``.
 
 The duplicate checks in :func:`create_tag` and :func:`update_tag` therefore
 exist for their error message rather than for correctness. The index is what
@@ -39,6 +40,10 @@ whole rule's worth of labels in one statement per kind, and both reads carry the
 source back so a tag's page can say who tagged each object. Whichever source
 wrote a label first keeps it — the duplicate insert is absorbed rather than
 overwriting — so a rule re-applying itself never claims a hand-applied label.
+
+Every label written here sets exactly one target column -- a row built by
+:func:`_label_row`, or one kind's ``INSERT ... SELECT`` in a replay. That is
+the only place the rule holds: the store has no CHECK constraint for it.
 """
 
 from __future__ import annotations
@@ -46,7 +51,6 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import (
-    ARRAY,
     Column,
     ColumnElement,
     FromClause,
@@ -55,7 +59,6 @@ from sqlalchemy import (
     Table,
     Text,
     and_,
-    cast,
     exists,
     func,
     literal,
@@ -64,16 +67,24 @@ from sqlalchemy import (
     or_,
     select,
     true,
+    type_coerce,
     union_all,
 )
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.exc import IntegrityError
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import (
+    NO_REFERENCED_ROW,
+    chunks,
+    delete_returning,
+    insert_returning,
+    mysql_errno,
+    update_returning,
+    upsert,
+)
 from auto_ontology.dal.session import IN_QUERY_BATCH, store, write_transaction
-
-#: The rule ``uq_tag_name_lower`` indexes, as a comparison the DAL can run.
-_FOLDED_NAME = func.lower(func.trim(s.tag.c.name))
+from auto_ontology.dal.types import new_id
 
 #: The tag automatic PII detection attaches. Ingestion finds it by name, so it
 #: may be neither deleted nor renamed: either would silently fork PII labels
@@ -111,7 +122,7 @@ TARGET_SQL_ATTRIBUTE = "sql_attribute"
 
 #: The one ``tag_target`` column each kind fills. Every function here that takes
 #: a *kind* resolves it through this, so the mapping between the name an API
-#: caller uses and the column ``exactly_one_target`` lets it set exists once.
+#: caller uses and the one column a label sets exists once.
 _TARGET_COLUMNS: dict[str, Column] = {
     TARGET_TERM: s.tag_target.c.term_id,
     TARGET_TABLE: s.tag_target.c.table_id,
@@ -125,10 +136,10 @@ _TARGET_COLUMNS: dict[str, Column] = {
 #: names, and that is the form a reader will type back into a query.
 _PATH_SEPARATOR = "."
 
-#: ``path`` for the kinds that have nowhere to point. Cast rather than a bare
-#: ``NULL`` because this is one branch of a ``UNION``, and an untyped null there
-#: leaves the column's type to be resolved from its neighbours.
-_NO_PATH = cast(null(), Text).label("path")
+#: ``path`` for the kinds that have nowhere to point. Typed because this is one
+#: branch of a ``UNION``, and SQLAlchemy takes a union column's type from its
+#: first branch, which is the Term one.
+_NO_PATH = type_coerce(null(), Text).label("path")
 
 #: The ancestors a tagged item is *addressed* through, as ids.
 #:
@@ -183,7 +194,7 @@ def _name_taken(name: str, *, exclude_id: str | None = None) -> bool:
     through for the same reason. Without it, re-typing a tag's own name -- or
     changing only its case -- would be reported as a name somebody else holds.
     """
-    statement = select(s.tag.c.id).where(_FOLDED_NAME == name.strip().lower())
+    statement = select(s.tag.c.id).where(s.tag.c.name_key == name.strip().lower())
     if exclude_id is not None:
         statement = statement.where(s.tag.c.id != exclude_id)
     return bool(store().query_read(statement))
@@ -256,7 +267,7 @@ def get_tag_by_name(name: str) -> dict[str, Any] | None:
     """One tag by its case-insensitive, trimmed name."""
 
     rows = store().query_read(
-        select(*_COLUMNS).where(_FOLDED_NAME == name.strip().lower())
+        select(*_COLUMNS).where(s.tag.c.name_key == name.strip().lower())
     )
     return rows[0] if rows else None
 
@@ -306,11 +317,10 @@ def existing_tag_ids(tag_ids: list[str]) -> set[str]:
 def _parent_ids(parents: dict[str, ColumnElement]) -> list[ColumnElement]:
     """The four ``_PARENT_ID_FIELDS`` columns, in order, nulled where absent.
 
-    Cast for the reason :data:`_NO_PATH` is: an untyped ``NULL`` in one branch
-    of a ``UNION`` takes its type from whichever branch happens to supply one.
+    Typed for the reason :data:`_NO_PATH` is.
     """
     return [
-        parents.get(field, cast(null(), Text)).label(field)
+        parents.get(field, type_coerce(null(), Text)).label(field)
         for field in _PARENT_ID_FIELDS
     ]
 
@@ -362,7 +372,7 @@ def _targets(
 
     Each branch selects only its own rows without filtering for them: *joins*
     starts at the one ``tag_target`` column this kind fills, and a row of
-    another kind has that column null — which is what ``exactly_one_target``
+    another kind has that column null — which every write in this module
     guarantees, and why no ``WHERE`` on the kind is needed.
 
     *parents* names whichever of :data:`_PARENT_ID_FIELDS` this kind has;
@@ -606,9 +616,8 @@ def fetch_tags_map(kind: str, item_ids: list[str]) -> dict[str, list[dict[str, A
 
     One query for the whole set when it fits, so a page listing a term's
     attributes reads their tags once rather than once per row. Larger id lists
-    are split into batches of :data:`IN_QUERY_BATCH` so a first ingest of a
-    catalog bigger than psycopg's 65535 bind parameters cannot raise on the
-    ``IN``.
+    are split into batches of :data:`IN_QUERY_BATCH`, so one statement's ``IN``
+    stays bounded however large a first ingest's catalog is.
 
     Only id and name: this is the chip a detail page draws beside the object,
     and the timestamps :func:`list_tags` returns describe the tag rather than
@@ -643,12 +652,11 @@ def create_tag(*, name: str, created_by: str | None = None) -> dict[str, Any]:
     ``ValueError`` when the name is already taken, whether that is caught by the
     check or by the unique index underneath it.
 
-    *created_by* is the Better Auth user id the router read from the gateway's
-    header. It is optional because the header is not guaranteed -- FastAPI is
-    reachable directly on the private network -- and ``None`` records that
-    nobody was named rather than failing the create over an audit field. The
-    pages read that as "Auto Generated": with no account to name, the
-    deployment is what is left.
+    *created_by* is the caller's Hopsworks username, from the proxy's signed
+    identity. It is optional because jobs create tags with no caller identity
+    (PII detection, rule replays), and ``None`` records that nobody was named
+    rather than failing the create over an audit field. The pages read that as
+    "Auto Generated": with no account to name, the deployment is what is left.
 
     ``modified_by`` is deliberately *not* set alongside it. It answers "who last
     edited this", and a tag that has only ever been created has not been edited
@@ -658,8 +666,8 @@ def create_tag(*, name: str, created_by: str | None = None) -> dict[str, Any]:
         raise ValueError(f"Tag with name {name!r} already exists")
 
     try:
-        rows = store().query_write(
-            s.tag.insert().values(name=name, created_by=created_by).returning(*_COLUMNS)
+        rows = insert_returning(
+            s.tag, {"name": name, "created_by": created_by}, _COLUMNS
         )
     except IntegrityError as exc:
         # Only the name rule is translated. A different constraint failing means
@@ -708,11 +716,11 @@ def update_tag(
         raise ValueError(f"Tag with name {name!r} already exists")
 
     try:
-        rows = store().query_write(
-            s.tag.update()
-            .where(s.tag.c.id == tag_id)
-            .values(name=name, modified_by=modified_by)
-            .returning(*_COLUMNS)
+        rows = update_returning(
+            s.tag,
+            s.tag.c.id == tag_id,
+            {"name": name, "modified_by": modified_by},
+            _COLUMNS,
         )
     except IntegrityError as exc:
         # Translated for the reason `create_tag` translates it, and only the
@@ -734,10 +742,7 @@ def delete_tag(tag_id: str) -> bool:
     Its ``tag_target`` rows go with it by cascade, so deleting a tag unlabels
     everything it labelled rather than leaving rows pointing at nothing.
     """
-    rows = store().query_write(
-        s.tag.delete().where(s.tag.c.id == tag_id).returning(s.tag.c.id)
-    )
-    return bool(rows)
+    return bool(delete_returning(s.tag, s.tag.c.id == tag_id, [s.tag.c.id]))
 
 
 def _attribute_without_a_term(kind: str, item_id: str) -> bool:
@@ -765,6 +770,59 @@ def _attribute_without_a_term(kind: str, item_id: str) -> bool:
         ).where(attribute.c.id == item_id)
     )
     return bool(rows) and not rows[0]["has_term"]
+
+
+def _label_row(
+    tag_id: str, kind: str, item_id: str, **source: str | None
+) -> dict[str, Any]:
+    """One ``tag_target`` row labelling the *kind* object *item_id*.
+
+    Sets exactly one target column. Raises ``ValueError`` for an unknown *kind*
+    and for an empty *item_id*, which would leave the row pointing at nothing.
+    *source* is ``tagged_by`` and ``rule_id``.
+    """
+    column = _target_column(kind)
+    if not item_id:
+        raise ValueError(f"A {kind} label needs the id of the object it labels")
+    return {"id": new_id(), "tag_id": tag_id, column.name: item_id, **source}
+
+
+def insert_labels(
+    kind: str,
+    tag_ids: list[str],
+    item_ids: list[str],
+    *,
+    tagged_by: str | None = None,
+    rule_id: str | None = None,
+) -> int:
+    """Label every *kind* object in *item_ids* with every tag in *tag_ids*.
+
+    Returns how many labels are new. A tag already on an object keeps its row
+    and its source, and is not counted; repeated ids count once. Each batch of
+    :data:`IN_QUERY_BATCH` rows is one transaction unless the caller holds one.
+
+    Raises ``ValueError`` for an unknown *kind* or an empty item id, before
+    anything is written, and the driver's ``IntegrityError`` when a tag or an
+    object does not exist.
+    """
+    rows = [
+        _label_row(tag_id, kind, item_id, tagged_by=tagged_by, rule_id=rule_id)
+        for tag_id in dict.fromkeys(tag_ids)
+        for item_id in dict.fromkeys(item_ids)
+    ]
+    written = 0
+    for batch in chunks(rows, IN_QUERY_BATCH):
+        ids = [row["id"] for row in batch]
+        with write_transaction():
+            upsert(s.tag_target, batch, key=["tag_id"])
+            # An absorbed duplicate keeps the existing row's id, so the ids
+            # generated here that landed are exactly the labels written.
+            written += store().query_read(
+                select(func.count(s.tag_target.c.id).label("written")).where(
+                    s.tag_target.c.id.in_(ids)
+                )
+            )[0]["written"]
+    return written
 
 
 def attach_tag(
@@ -800,26 +858,17 @@ def attach_tag(
     straight to the API — an attribute with no Term appears in no list the UI
     can offer a tag picker from.
     """
-    column = _target_column(kind)
     if _attribute_without_a_term(kind, item_id):
         raise ValueError(
             f"{kind} {item_id!r} is not a property of any term, so it cannot be tagged"
         )
     try:
-        store().query_write(
-            insert(s.tag_target)
-            .values(
-                tag_id=tag_id,
-                tagged_by=tagged_by,
-                **{column.name: item_id},
-            )
-            .on_conflict_do_nothing()
-        )
+        insert_labels(kind, [tag_id], [item_id], tagged_by=tagged_by)
     except IntegrityError as exc:
         # A foreign key is the only constraint left to fail here: the unique
-        # ones are handled above, and `exactly_one_target` cannot trip when
-        # exactly one column is set. Anything else is a bug worth surfacing.
-        if "fk_tag_target" not in str(exc.orig):
+        # ones are absorbed by the insert. Anything else is a bug worth
+        # surfacing.
+        if mysql_errno(exc) != NO_REFERENCED_ROW:
             raise
         return None
 
@@ -833,12 +882,12 @@ def attach_tags_by_rule(
 
     *targets* is ``(kind, item_id)`` pairs, which is what replaying a rule's
     search yields once the kinds it cannot label are dropped. Returns how many
-    labels this actually applied, which is the point of the ``RETURNING``: the
-    number a caller can log or report without reading membership back.
+    labels this actually applied: the number a caller can log or report without
+    reading membership back.
 
-    One statement per kind rather than one per label. A rule matching a few
-    hundred objects across a handful of tags is thousands of rows, and a round
-    trip each would make creating a rule a request that visibly hangs.
+    One statement per kind and batch rather than one per label. A rule matching
+    a few hundred objects across a handful of tags is thousands of rows, and a
+    round trip each would make creating a rule a request that visibly hangs.
 
     Already-labelled objects are skipped, not overwritten -- see
     :func:`attach_tag` on why the first source of a label keeps it -- so
@@ -861,23 +910,10 @@ def attach_tags_by_rule(
     for kind, item_id in targets:
         by_kind.setdefault(kind, []).append(item_id)
 
-    applied = 0
-    for kind, item_ids in by_kind.items():
-        column = _target_column(kind)
-        rows = [
-            {"tag_id": tag_id, "rule_id": rule_id, column.name: item_id}
-            for tag_id in dict.fromkeys(tag_ids)
-            for item_id in dict.fromkeys(item_ids)
-        ]
-        applied += len(
-            store().query_write(
-                insert(s.tag_target)
-                .values(rows)
-                .on_conflict_do_nothing()
-                .returning(s.tag_target.c.id)
-            )
-        )
-    return applied
+    return sum(
+        insert_labels(kind, tag_ids, item_ids, rule_id=rule_id)
+        for kind, item_ids in by_kind.items()
+    )
 
 
 def apply_labels_now_matched(
@@ -894,10 +930,10 @@ def apply_labels_now_matched(
     *targets* is a ``SELECT id`` per kind, as
     :func:`auto_ontology.dal.search.matching_id_selects` produces it — statements, not
     ids. They are embedded in the write rather than run first, so a rule
-    matching fifty thousand columns never moves an id out of Postgres: the
+    matching fifty thousand columns never moves an id out of the database: the
     match, the comparison against what is already labelled, and the insert are
-    one plan per statement. That is what makes this affordable on every ingest
-    rather than only on the small rules.
+    one statement per kind and batch. That is what makes this affordable on
+    every ingest rather than only on the small rules.
 
     Returns labels written, not objects matched -- an object already carrying
     the tag is untouched and uncounted, which is what makes a run over an
@@ -909,106 +945,77 @@ def apply_labels_now_matched(
     Tags no longer in *tag_ids* are not considered, because they cannot occur:
     a rule's tags are fixed at creation (see :func:`auto_ontology.dal.rules.update_rule`)
     and a tag deleted from the vocabulary takes its labels with it by cascade.
+    Repeats in *tag_ids* are one label: two clicks on one tag are one
+    intention, as :func:`attach_tags_by_rule` treats them.
 
-    One transaction over the kinds, which is as much as is worth holding: five
-    statements that are one rule's labels, and a rule applied to Columns but
-    not to the Terms it also matched is a state no reader should see.
+    **Written in batches** of :data:`IN_QUERY_BATCH` labels, each its own
+    transaction unless the caller holds one, because RonDB caps a transaction
+    at 32,768 changed rows and a first pass over a large catalog writes a row
+    per matched object and tag. So a reader can see a rule applied to part of
+    what it matches while this runs, and a failure keeps the batches already
+    written; the next replay continues from there, since every batch asks
+    afresh what is still unlabelled.
 
-    One statement per kind, which is as far as this can be collapsed:
-    ``tag_target`` has a column per kind, so two kinds cannot share an INSERT.
+    The ``NOT EXISTS`` is what keeps the nightly pass cheap: on a settled
+    catalog every matched pair is already labelled, and leaving before the row
+    is formed skips offering each one to the unique keys only to be absorbed.
 
-    The tags are *not* a statement each. They arrive as an array and are
-    cross-joined to the match, so the work is one pass whatever a rule carries.
-    Both of the things that make that cheap matter, and dropping either brings
-    back a cost proportional to the tags -- measured over half a million
-    columns with a hundred thousand of them matching, on a pass where every
-    label was already in place:
-
-    The ``NOT EXISTS`` is the larger one, 1.6s down to 0.4s for three tags.
-    Without it the conflict clause is still correct but arrives too late: every
-    matched row is built and offered to the index before being thrown away, and
-    on a settled catalog that is the whole hundred thousand, every night, for
-    nothing. Leaving with the row not yet formed skips all of it.
-
-    ``unnest`` is what keeps that flat: one tag, three and five all measured
-    0.4s, where a statement each would have paid the 0.4s five times. Rules
-    multiply the same way, so on a deployment with tens of rules the two
-    together are the difference between a nightly pass of seconds and one of
-    minutes -- five tags were 2.7s before this and 0.4s after.
-
-    Neither helps the *first* pass, which really does write a row per pair --
-    three tags over that catalog took eight seconds either way, the ``NOT
-    EXISTS`` costing about 6% for an anti-join that finds nothing. That is the
-    right trade: the first pass happens once and the idle one every night
-    after.
-
-    Not a materialized CTE. Reading the match once per tag sounds like the
-    thing to avoid, but the scan is 73ms of the above and pinning it measured
-    no better -- the cost is in the rows, not in finding them.
-
-    Repeats collapse before the array is built: two clicks on one tag are one
-    intention, as :func:`attach_tags_by_rule` treats them, and the duplicate
-    would otherwise survive the anti-join, which only knows what is already
-    stored.
-
-    ``on_conflict_do_nothing`` stays behind the anti-join as the guarantee
-    rather than the filter: the two read the same ``(tag_id, <kind>)`` unique
-    constraints, but a label applied by hand between this statement's snapshot
-    and its write would slip past the first and has to not raise. It is also
-    what keeps such a label with the person who applied it -- see
+    ``ON DUPLICATE KEY UPDATE`` stays behind the anti-join as the guarantee
+    rather than the filter: a label applied by hand between this statement's
+    read and its write would slip past the first and has to not raise. It is
+    also what keeps such a label with the person who applied it -- see
     :func:`attach_tags_by_rule`, which absorbs the duplicate for the same
-    reason. ``id`` is left to the column default.
+    reason. A label absorbed that way is counted as written.
     """
     if not tag_ids:
         return 0
 
-    # ``render_derived`` and not ``alias``, as in ``search._synonym_exists``:
-    # the alias alone names the function's result without naming its column,
-    # and ``rule_tag.tag_id`` is then an undefined column at runtime.
-    tags = (
-        func.unnest(cast(list(dict.fromkeys(tag_ids)), ARRAY(Text)))
-        .table_valued("tag_id")
-        .render_derived("rule_tag")
-    )
     stored = s.tag_target.alias("stored")
-
+    batch = IN_QUERY_BATCH
     applied = 0
-    with write_transaction():
-        for kind, matched in targets.items():
-            column = _target_column(kind)
-            found = matched.subquery()
-            applied += len(
-                store().query_write(
-                    insert(s.tag_target)
-                    .from_select(
-                        ["tag_id", "rule_id", column.name],
-                        # ``ON true``: the cross product of the tags and the
-                        # match *is* what "apply these tags to these objects"
-                        # means. Spelled as a join rather than as two FROM
-                        # entries only so it reads as deliberate -- SQLAlchemy
-                        # warns about the latter, on the assumption that a
-                        # cartesian product is a forgotten condition.
-                        select(tags.c.tag_id, literal(rule_id), found.c.id)
-                        .select_from(found.join(tags, true()))
-                        .where(
-                            # Deliberately blind to `rule_id`: what the
-                            # constraint forbids is the tag twice on the
-                            # object, whoever put it there, so this has to ask
-                            # the same question.
-                            not_(
-                                exists(
-                                    select(literal(1)).where(
-                                        stored.c.tag_id == tags.c.tag_id,
-                                        stored.c[column.name] == found.c.id,
-                                    )
-                                )
+    for kind, matched in targets.items():
+        column = _target_column(kind)
+        found = matched.subquery()
+        statement = (
+            insert(s.tag_target)
+            .from_select(
+                ["id", "tag_id", "rule_id", column.name],
+                # ``ON true``: the cross product of the tags and the match *is*
+                # what "apply these tags to these objects" means. Spelled as a
+                # join rather than as two FROM entries only so it reads as
+                # deliberate -- SQLAlchemy warns about the latter, on the
+                # assumption that a cartesian product is a forgotten condition.
+                select(func.uuid(), s.tag.c.id, literal(rule_id), found.c.id)
+                .select_from(found.join(s.tag, true()))
+                .where(
+                    s.tag.c.id.in_(tag_ids),
+                    # Deliberately blind to `rule_id`: what the unique keys
+                    # forbid is the tag twice on the object, whoever put it
+                    # there, so this has to ask the same question.
+                    not_(
+                        exists(
+                            select(literal(1)).where(
+                                stored.c.tag_id == s.tag.c.id,
+                                stored.c[column.name] == found.c.id,
                             )
-                        ),
-                    )
-                    .on_conflict_do_nothing()
-                    .returning(s.tag_target.c.id)
+                        )
+                    ),
                 )
+                .limit(batch),
             )
+            .on_duplicate_key_update(tag_id=s.tag_target.c.tag_id)
+        )
+        while True:
+            with write_transaction():
+                store().query_write(statement)
+                # One per row the SELECT produced, absorbed ones included:
+                # SQLAlchemy connects with CLIENT_FOUND_ROWS. Which is also
+                # what makes a short batch mean the match is exhausted.
+                counted = store().query_read(select(func.row_count().label("n")))
+            written = counted[0]["n"]
+            applied += written
+            if written < batch:
+                break
     return applied
 
 
@@ -1033,9 +1040,11 @@ def remove_labels_no_longer_matched(*, rule_id: str, targets: dict[str, Select])
     search is removed, because a rule-applied tag is the rule still holding
     rather than a fact of its own.
 
-    One statement for every kind at once, unlike the insert: what is deleted is
+    One condition for every kind at once, unlike the insert: what is deleted is
     identified by ``rule_id`` and the columns are only a test, so all five fit
-    in one WHERE.
+    in one WHERE. The rows it selects are read first and deleted by id, because
+    MySQL refuses a DELETE whose WHERE reads the table it deletes from, and a
+    rule's match does whenever its filters name tags.
 
     That test is "kept", negated. A row is kept when the column for its kind is
     the one it fills *and* its id is still in that kind's match; anything else
@@ -1065,11 +1074,15 @@ def remove_labels_no_longer_matched(*, rule_id: str, targets: dict[str, Select])
     if kept:
         conditions.append(not_(or_(*kept)))
     with write_transaction():
-        rows = store().query_write(
-            s.tag_target.delete()
+        rows = store().query_read(
+            select(s.tag_target.c.id, s.tag_target.c.tag_id, s.tag_target.c.column_id)
             .where(*conditions)
-            .returning(s.tag_target.c.tag_id, s.tag_target.c.column_id)
+            .with_for_update()
         )
+        for batch in chunks([row["id"] for row in rows], IN_QUERY_BATCH):
+            store().query_write(
+                s.tag_target.delete().where(s.tag_target.c.id.in_(batch))
+            )
         _cascade_pii_off_columns(rows)
         return len(rows)
 
@@ -1110,10 +1123,10 @@ def detach_tag(*, tag_id: str, kind: str, item_id: str) -> list[dict[str, Any]] 
     three mean the page acted on a chip that is no longer there.
     """
     column = _target_column(kind)
-    rows = store().query_write(
-        s.tag_target.delete()
-        .where(s.tag_target.c.tag_id == tag_id, column == item_id)
-        .returning(s.tag_target.c.id)
+    rows = delete_returning(
+        s.tag_target,
+        and_(s.tag_target.c.tag_id == tag_id, column == item_id),
+        [s.tag_target.c.id],
     )
     if not rows:
         return None

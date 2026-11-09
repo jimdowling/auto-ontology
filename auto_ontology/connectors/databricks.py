@@ -31,12 +31,6 @@ logger = logging.getLogger(__name__)
 # Warnings and errors — including retry/timeout warnings — still come through.
 logging.getLogger("databricks.sql").setLevel(logging.WARNING)
 
-# Which credential a connector is running under, logged with every statement.
-# "SSO federation" means the caller's SSO token was exchanged for a Databricks
-# token, so the query carries that user's own Unity Catalog grants.
-AUTH_SSO_FEDERATION = "the signed-in user (SSO federation)"
-AUTH_STORED_TOKEN = "the stored access token"
-
 
 def _quoted_identifier(name: str) -> str:
     """Return a Databricks-quoted identifier."""
@@ -98,12 +92,12 @@ def _split_qualified(reference: str) -> tuple[str, str]:
 
 def _parse_connection_string(
     connection_string: str,
-) -> tuple[dict[str, Any], str, str]:
-    """Parse a Databricks URL into connector kwargs, catalog, and auth mode.
+) -> tuple[dict[str, Any], str]:
+    """Parse a Databricks URL into connector kwargs and catalog.
 
     Expected format::
 
-        databricks://token:ACCESS_TOKEN@HOST/CATALOG?http_path=SQL_HTTP_PATH[&auth=sso]
+        databricks://token:ACCESS_TOKEN@HOST/CATALOG?http_path=SQL_HTTP_PATH
     """
     parsed = urlparse(connection_string)
     if parsed.scheme.split("+", 1)[0].lower() != "databricks":
@@ -135,12 +129,6 @@ def _parse_connection_string(
             "Databricks connection string requires ?http_path=/sql/1.0/warehouses/..."
         )
 
-    auth_mode = (
-        AUTH_SSO_FEDERATION
-        if query.get("auth", [""])[0].strip().lower() == "sso"
-        else AUTH_STORED_TOKEN
-    )
-
     return (
         {
             "server_hostname": parsed.hostname,
@@ -154,7 +142,6 @@ def _parse_connection_string(
             "enable_telemetry": False,
         },
         catalog,
-        auth_mode,
     )
 
 
@@ -173,7 +160,6 @@ class DatabricksDatabase(SQLDatabase):
         (
             self._connect_kwargs,
             self._database_name,
-            self._auth_mode,
         ) = _parse_connection_string(connection_string)
         self._schema_filter: set[str] | None = (
             {schema.casefold() for schema in schemas if schema.strip()}
@@ -233,15 +219,6 @@ class DatabricksDatabase(SQLDatabase):
             )
         parts = (self._database_name, schema, table)
         return ".".join(_quoted_identifier(p) for p in parts)
-
-    @property
-    def auth_mode(self) -> str:
-        """Which credential this connector runs under, for logging.
-
-        Either :data:`AUTH_SSO_FEDERATION` (the caller's SSO token was exchanged
-        for a Databricks token) or :data:`AUTH_STORED_TOKEN`.
-        """
-        return self._auth_mode
 
     @contextmanager
     def reuse_connection(self) -> Iterator[None]:

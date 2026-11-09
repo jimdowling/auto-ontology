@@ -5,22 +5,28 @@
 """Auto Ontology data access layer, organised by topic.
 
 Each module is the single source of truth for a domain:
-  datasources     — Database / Schema / Table / Column catalog
-  terms           — Term CRUD and synonym reads (semantic compilation)
-  attributes      — ColumnAttribute, SEMANTIC_FK, join path traversal
-  custom_analyses — CustomAnalysis and its SQL
-  sql_attributes  — SqlAttribute and its SQL
-  connections     — UI-managed database connection metadata
-  reset           — Deleting a database's catalog/semantic rows and embeddings
-  candidates      — Vector-hit enrichment at retrieval time
-  exploration     — The data- and semantic-layer Exploration graphs
-  search          — Fulltext global search across catalog and semantic rows
-  users           — Zone-scope helpers. Accounts live in Prisma's tables, not here.
-  groups          — User groups and their membership. Accounts stay in Prisma;
-                    a membership stores the Better Auth id with no foreign key.
+  datasources       — Database / Schema / Table / Column catalog
+  terms             — Term CRUD and synonym reads (semantic compilation)
+  attributes        — ColumnAttribute, SEMANTIC_FK, join path traversal
+  custom_analyses   — CustomAnalysis and its SQL
+  pql_analyses      — PqlAnalysis, a question paired with a KumoRFM PQL query
+  sql_attributes    — SqlAttribute and its SQL
+  connections       — The ontology's sources: the Hopsworks data source each
+                      catalog database is read from, never its credentials
+  reset             — Deleting a database's catalog/semantic rows and embeddings
+  candidates        — Vector-hit enrichment at retrieval time
+  exploration       — The data- and semantic-layer Exploration graphs
+  model_interchange — Model YAML export and import
+  search            — Substring global search across catalog and semantic rows
+  settings          — Configuration flags, acronyms and custom prompts
+  users             — Zone-scope helpers. Accounts are Hopsworks project members.
+  groups            — User groups and their membership; a membership stores a
+                      Hopsworks username with no foreign key.
 
-``schema`` holds the SQLAlchemy Core table metadata and ``session`` the pooled
-engine; everything else queries through them.
+``schema`` holds the SQLAlchemy Core table metadata, ``session`` the pooled
+engine, ``ops`` the write idioms MySQL lacks (``RETURNING``, targeted upserts)
+and ``migrations`` the recorded schema steps; everything else queries through
+them.
 """
 
 from __future__ import annotations

@@ -23,8 +23,9 @@ tagless rule outright, for the same reason and without waiting for a caller to
 refuse it first.
 
 Rule names are unique, folded for case and surrounding space, exactly as tag
-names are -- ``uq_rule_name_lower`` in the schema, and :func:`_name_taken` in
-front of it so the answer is a message rather than a constraint violation.
+names are -- ``uq_rule_name_lower`` over the stored ``name_key`` in the schema,
+and :func:`_name_taken` in front of it so the answer is a message rather than a
+constraint violation.
 
 The read side is paged, and :func:`list_rules` and :func:`count_rules` take the
 same *search* so a page and its total describe one list. There is no read of one
@@ -52,10 +53,9 @@ from sqlalchemy import ColumnElement, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import delete_returning, update_returning
 from auto_ontology.dal.session import store, write_transaction
-
-#: The rule ``uq_rule_name_lower`` indexes, as a comparison the DAL can run.
-_FOLDED_NAME = func.lower(func.trim(s.rule.c.name))
+from auto_ontology.dal.types import new_id
 
 #: Every column a rule read returns, in one place so the list, the single-rule
 #: read and the rename cannot drift into answering with different shapes.
@@ -80,7 +80,7 @@ def _name_taken(name: str, *, exclude_id: str | None = None) -> bool:
     through for the same reason. Without it, re-typing a rule's own name -- or
     changing only its case -- would be reported as a name somebody else holds.
     """
-    statement = select(s.rule.c.id).where(_FOLDED_NAME == name.strip().lower())
+    statement = select(s.rule.c.id).where(s.rule.c.name_key == name.strip().lower())
     if exclude_id is not None:
         statement = statement.where(s.rule.c.id != exclude_id)
     return bool(store().query_read(statement))
@@ -125,8 +125,8 @@ def create_rule(
     Raises ``ValueError`` for an empty *tags*, before anything is written. This
     module holds that a rule with no tags applies nothing, so the case is
     invalid here rather than only at whichever caller happens to check: without
-    it the empty list compiles to ``INSERT INTO rule__tag DEFAULT VALUES`` and
-    the answer is a not-null violation on a row nobody meant to write.
+    it the empty list compiles to an insert of one row with no values, and the
+    answer is a not-null violation on a row nobody meant to write.
 
     Raises ``IntegrityError`` for a tag id that is not a tag. The route checks
     the ids first, for the sake of the 404 it owes and the message on it; this
@@ -137,18 +137,18 @@ def create_rule(
     if _name_taken(name):
         raise _taken(name)
 
+    rule_id = new_id()
     with write_transaction():
         try:
-            rows = store().query_write(
-                s.rule.insert()
-                .values(
+            store().query_write(
+                s.rule.insert().values(
+                    id=rule_id,
                     name=name,
                     search_term=search_term,
                     text_match_option=text_match_option,
                     filters=filters,
                     created_by=created_by,
                 )
-                .returning(s.rule.c.id)
             )
         except IntegrityError as exc:
             # Translated only for the name rule. Everything else this statement
@@ -157,7 +157,6 @@ def create_rule(
             if "uq_rule_name_lower" not in str(exc.orig):
                 raise
             raise _taken(name) from exc
-        rule_id = rows[0]["id"]
 
         store().query_write(
             s.rule__tag.insert().values(
@@ -304,11 +303,11 @@ def update_rule(
         raise _taken(name)
 
     try:
-        rows = store().query_write(
-            s.rule.update()
-            .where(s.rule.c.id == rule_id)
-            .values(name=name, modified_by=modified_by)
-            .returning(*_COLUMNS)
+        rows = update_returning(
+            s.rule,
+            s.rule.c.id == rule_id,
+            {"name": name, "modified_by": modified_by},
+            _COLUMNS,
         )
     except IntegrityError as exc:
         # As on the create, and only the name rule: nothing else this statement
@@ -337,7 +336,7 @@ def _delete_tags_left_labelling_nothing(tag_ids: list[str]) -> None:
     still applies would silently strip that rule of it, and a rule with no tags
     applies nothing and could not have been created in the first place.
 
-    Postgres decides which rows those are, rather than a read followed by a
+    The database decides which rows those are, rather than a read followed by a
     delete: the labels this rule wrote are gone by the time this runs, so the
     condition is about the rows that are left, and asking the database keeps the
     answer and the delete in one statement.
@@ -349,7 +348,7 @@ def _delete_tags_left_labelling_nothing(tag_ids: list[str]) -> None:
             s.tag.c.id.in_(tag_ids),
             # Ingestion finds the system tag by name; deleting an emptied copy
             # would let the next detect create another id and fork the labels.
-            func.lower(func.trim(s.tag.c.name)) != PII_TAG_NAME.lower(),
+            s.tag.c.name_key != PII_TAG_NAME.lower(),
             ~select(literal(1)).where(s.tag_target.c.tag_id == s.tag.c.id).exists(),
             ~select(literal(1)).where(s.rule__tag.c.tag_id == s.tag.c.id).exists(),
         )
@@ -426,11 +425,7 @@ def delete_rule(rule_id: str, *, keep_tags: bool = False) -> bool:
                     .scalar_subquery(),
                 )
             )
-            return bool(
-                store().query_write(
-                    s.rule.delete().where(s.rule.c.id == rule_id).returning(s.rule.c.id)
-                )
-            )
+            return bool(delete_returning(s.rule, s.rule.c.id == rule_id, [s.rule.c.id]))
 
         # Read before the delete, which is the only moment the rule's tags can
         # be known: `rule__tag` cascades, so afterwards there is nothing left
@@ -449,11 +444,7 @@ def delete_rule(rule_id: str, *, keep_tags: bool = False) -> bool:
                 s.tag_target.c.column_id.is_not(None),
             )
         )
-        deleted = bool(
-            store().query_write(
-                s.rule.delete().where(s.rule.c.id == rule_id).returning(s.rule.c.id)
-            )
-        )
+        deleted = bool(delete_returning(s.rule, s.rule.c.id == rule_id, [s.rule.c.id]))
         if deleted:
             # After the cascade, so SQL realign does not still see this rule's
             # column labels. Imported lazily: :mod:`auto_ontology.dal.tags`

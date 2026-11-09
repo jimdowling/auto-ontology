@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Chat SQL logging reports the statement and the credential behind it."""
+"""Chat SQL is logged, capped in time, and limited to one read-only query."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import pytest
 from pytest import LogCaptureFixture
 
-from auto_ontology.connectors.databricks import AUTH_SSO_FEDERATION, AUTH_STORED_TOKEN
 from auto_ontology.infra.feature_flags import DEFAULT_SQL_QUERY_TIMEOUT_SECONDS
 from auto_ontology.retrieval.text_to_sql import chat_sql
 from auto_ontology.retrieval.text_to_sql.chat_sql import (
@@ -33,32 +32,7 @@ def configured_timeout(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     return stored
 
 
-def test_logs_sso_federated_credential(caplog: LogCaptureFixture) -> None:
-    connector = SimpleNamespace(database_name="kdc_ca1", auth_mode=AUTH_SSO_FEDERATION)
-
-    with caplog.at_level(logging.INFO, logger=_LOGGER):
-        log_chat_sql(connector, "SELECT 1")
-
-    assert f"[kdc_ca1] Executing chat SQL as {AUTH_SSO_FEDERATION}:\nSELECT 1" in [
-        r.getMessage() for r in caplog.records
-    ]
-
-
-def test_logs_stored_token_credential(caplog: LogCaptureFixture) -> None:
-    connector = SimpleNamespace(database_name="kdc_ca1", auth_mode=AUTH_STORED_TOKEN)
-
-    with caplog.at_level(logging.INFO, logger=_LOGGER):
-        log_chat_sql(connector, "SELECT 1")
-
-    assert f"[kdc_ca1] Executing chat SQL as {AUTH_STORED_TOKEN}:\nSELECT 1" in [
-        r.getMessage() for r in caplog.records
-    ]
-
-
-def test_omits_credential_for_connectors_without_auth_mode(
-    caplog: LogCaptureFixture,
-) -> None:
-    """Postgres et al. have one fixed credential — don't imply otherwise."""
+def test_logs_the_database_and_statement(caplog: LogCaptureFixture) -> None:
     connector = SimpleNamespace(database_name="mydb")
 
     with caplog.at_level(logging.INFO, logger=_LOGGER):
@@ -66,16 +40,15 @@ def test_omits_credential_for_connectors_without_auth_mode(
 
     messages = [r.getMessage() for r in caplog.records]
     assert "[mydb] Executing chat SQL:\nSELECT 1" in messages
-    assert not any("as the" in m for m in messages)
 
 
 def test_probe_queries_are_labelled(caplog: LogCaptureFixture) -> None:
-    connector = SimpleNamespace(database_name="kdc_ca1", auth_mode=AUTH_STORED_TOKEN)
+    connector = SimpleNamespace(database_name="kdc_ca1")
 
     with caplog.at_level(logging.INFO, logger=_LOGGER):
         log_chat_sql(connector, "SELECT 1", kind="probe SQL")
 
-    assert any("Executing probe SQL as" in r.getMessage() for r in caplog.records)
+    assert any("Executing probe SQL:" in r.getMessage() for r in caplog.records)
 
 
 def test_unknown_database_name_does_not_crash(caplog: LogCaptureFixture) -> None:
@@ -177,3 +150,39 @@ def test_an_explicit_timeout_overrides_the_configured_one(
     execute_chat_sql(connector, "SELECT 1", timeout_s=7)
 
     assert connector.calls == [("SELECT 1", {"timeout_s": 7})]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 1",
+        "WITH t AS (SELECT a FROM x) SELECT a FROM t",
+        "SELECT a FROM x UNION ALL SELECT a FROM y",
+        "(SELECT a FROM x)",
+    ],
+)
+def test_a_single_read_only_query_may_run(sql: str) -> None:
+    chat_sql.require_read_only(sql, "postgres")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM x",
+        "SELECT 1; DROP TABLE x",
+        "WITH gone AS (DELETE FROM x RETURNING *) SELECT * FROM gone",
+        "SELECT * INTO copy FROM x",
+        "UPDATE x SET a = 1",
+        "CREATE TABLE y AS SELECT * FROM x",
+        "GRANT ALL ON x TO PUBLIC",
+        "SELECT FROM WHERE (",
+    ],
+)
+def test_anything_else_is_refused_before_it_runs(sql: str) -> None:
+    ran: list[str] = []
+    connector = SimpleNamespace(
+        database_name="db", dialect="postgres", execute=ran.append
+    )
+    with pytest.raises(chat_sql.ReadOnlySQLError):
+        execute_chat_sql(connector, sql)
+    assert ran == []

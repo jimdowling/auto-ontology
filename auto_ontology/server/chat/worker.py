@@ -134,14 +134,7 @@ def _worker_loop(
         if tag != _MSG_ASK:
             continue
 
-        (
-            question,
-            prediction,
-            target_db,
-            subject_token,
-            conversation_history,
-            evidence,
-        ) = payload
+        question, prediction, target_db, conversation_history, evidence = payload
         try:
             # Connections are resolved once at worker init. If that
             # lookup came back empty — the store not yet reachable when this
@@ -153,23 +146,8 @@ def _worker_loop(
             # retries while there is nothing to cache, so this costs nothing
             # on the normal path.
             #
-            # This has to run BEFORE ``ask_connectors`` is bound: binding first
-            # would capture the stale empty list, and rebinding ``connectors``
-            # here would not update it, leaving the healing ineffective.
             if not connectors:
                 connectors = get_connectors()
-
-            # Per-user Databricks auth trades the prewarmed connectors for ones
-            # bound to the caller's exchanged token. Databricks connectors open
-            # connections per operation, so rebuilding them here is cheap.
-            if subject_token is not None:
-                from auto_ontology.connectors.registry import (
-                    get_connectors_for_subject_token,
-                )
-
-                ask_connectors = get_connectors_for_subject_token(subject_token)
-            else:
-                ask_connectors = connectors
 
             is_follow_up, processing_question = resolve_follow_up(
                 question=question,
@@ -190,7 +168,7 @@ def _worker_loop(
                 "prediction": prediction,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
-                "connectors": ask_connectors,
+                "connectors": connectors,
                 "acronyms": fetch_acronyms(),
                 "custom_prompts": custom_prompts,
             }
@@ -243,7 +221,6 @@ class PrewarmedWorker:
         question: str,
         prediction: bool | None = None,
         target_db: str | None = None,
-        subject_token: str | None = None,
         conversation_history: list[dict[str, str | None]] | None = None,
         evidence: str | None = None,
     ) -> None:
@@ -252,9 +229,6 @@ class PrewarmedWorker:
         *prediction* mirrors the API parameter: True or False skips the
         classification step, None classifies as usual.
         *target_db* scopes the run to one connected database when set.
-        *subject_token* is the caller's SSO JWT. When present the worker builds
-        per-user connectors for this question instead of using the prewarmed
-        ones, so SQL executes under that user's own Databricks grants.
         *evidence* is optional authoritative evidence kept separate from
         the question.
         """
@@ -265,7 +239,6 @@ class PrewarmedWorker:
                     question,
                     prediction,
                     target_db,
-                    subject_token,
                     conversation_history or [],
                     evidence,
                 ),

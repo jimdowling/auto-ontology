@@ -19,62 +19,63 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import literal, select, union
 
+from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store
 
-#: One query in place of four round trips.
-#:
-#: Expansion runs **one level from each direct grant**, and not transitively —
-#: granting a table admits its schema, but not that schema's other tables.
-#: Every branch reads from ``granted`` rather than from another CTE, which is
-#: what keeps it non-recursive.
-_ACCESSIBLE_SQL = """
-WITH granted AS (
-    SELECT database_id, schema_id, table_id
-      FROM zone_target
-     WHERE zone_id = ANY(:zone_ids)
-),
-tabs AS (
-    -- granted directly
-    SELECT table_id AS id FROM granted WHERE table_id IS NOT NULL
-    UNION
-    -- under a granted schema
-    SELECT t.id FROM catalog_table t
-      JOIN granted g ON g.schema_id = t.schema_id
-    UNION
-    -- under a granted database
-    SELECT t.id FROM catalog_table t
-      JOIN catalog_schema s ON s.id = t.schema_id
-      JOIN granted g ON g.database_id = s.database_id
-),
-schemas AS (
-    SELECT schema_id AS id FROM granted WHERE schema_id IS NOT NULL
-    UNION
-    SELECT s.id FROM catalog_schema s
-      JOIN granted g ON g.database_id = s.database_id
-    UNION
-    -- the parent of a directly granted table
-    SELECT t.schema_id FROM catalog_table t
-      JOIN granted g ON g.table_id = t.id
-),
-dbs AS (
-    SELECT database_id AS id FROM granted WHERE database_id IS NOT NULL
-    UNION
-    -- the parent of a directly granted schema
-    SELECT s.database_id FROM catalog_schema s
-      JOIN granted g ON g.schema_id = s.id
-    UNION
-    -- the grandparent of a directly granted table
-    SELECT s.database_id FROM catalog_schema s
-      JOIN catalog_table t ON t.schema_id = s.id
-      JOIN granted g ON g.table_id = t.id
-)
-SELECT
-    (SELECT coalesce(array_agg(id), '{}') FROM dbs)     AS db_ids,
-    (SELECT coalesce(array_agg(id), '{}') FROM schemas) AS schema_ids,
-    (SELECT coalesce(array_agg(id), '{}') FROM tabs)    AS table_ids
-"""
+
+def _accessible_ids_statement(zone_ids: list[str]) -> Any:
+    """``(kind, id)`` rows for every catalog id *zone_ids* reach, in one query,
+    where ``kind`` is ``db_ids``, ``schema_ids`` or ``table_ids``.
+
+    Expansion runs **one level from each direct grant**, and not transitively:
+    granting a table admits its schema, but not that schema's other tables.
+    Every branch reads from ``granted`` rather than from another branch, which
+    is what keeps it non-recursive.
+    """
+    target, table, schema = s.zone_target, s.catalog_table, s.catalog_schema
+    granted = (
+        select(target.c.database_id, target.c.schema_id, target.c.table_id)
+        .where(target.c.zone_id.in_(zone_ids))
+        .cte("granted")
+    )
+
+    def rows(kind: str, column: Any) -> Any:
+        return select(literal(kind).label("kind"), column.label("id"))
+
+    return union(
+        # Tables: granted directly, under a granted schema, under a granted database.
+        rows("table_ids", granted.c.table_id).where(granted.c.table_id.isnot(None)),
+        rows("table_ids", table.c.id).select_from(
+            table.join(granted, granted.c.schema_id == table.c.schema_id)
+        ),
+        rows("table_ids", table.c.id).select_from(
+            table.join(schema, schema.c.id == table.c.schema_id).join(
+                granted, granted.c.database_id == schema.c.database_id
+            )
+        ),
+        # Schemas: granted directly, under a granted database, the parent of a
+        # granted table.
+        rows("schema_ids", granted.c.schema_id).where(granted.c.schema_id.isnot(None)),
+        rows("schema_ids", schema.c.id).select_from(
+            schema.join(granted, granted.c.database_id == schema.c.database_id)
+        ),
+        rows("schema_ids", table.c.schema_id).select_from(
+            table.join(granted, granted.c.table_id == table.c.id)
+        ),
+        # Databases: granted directly, the parent of a granted schema, the
+        # grandparent of a granted table.
+        rows("db_ids", granted.c.database_id).where(granted.c.database_id.isnot(None)),
+        rows("db_ids", schema.c.database_id).select_from(
+            schema.join(granted, granted.c.schema_id == schema.c.id)
+        ),
+        rows("db_ids", schema.c.database_id).select_from(
+            schema.join(table, table.c.schema_id == schema.c.id).join(
+                granted, granted.c.table_id == table.c.id
+            )
+        ),
+    )
 
 
 def get_accessible_catalog_ids_for_zones(
@@ -88,18 +89,20 @@ def get_accessible_catalog_ids_for_zones(
     Parents are included so the catalog tree can be rendered: a zone granting a
     table also admits that table's schema and database. Children are included
     the other way: a zone granting a database admits its schemas and their
-    tables. Neither direction is transitive — see :data:`_ACCESSIBLE_SQL`.
+    tables. Neither direction is transitive.
     """
-    if not zone_ids:
-        return {"db_ids": set(), "schema_ids": set(), "table_ids": set()}
-
-    rows = store().query_read(text(_ACCESSIBLE_SQL), {"zone_ids": list(zone_ids)})
-    row = rows[0]
-    return {
-        "db_ids": {i for i in (row["db_ids"] or []) if i},
-        "schema_ids": {i for i in (row["schema_ids"] or []) if i},
-        "table_ids": {i for i in (row["table_ids"] or []) if i},
+    found: dict[str, set[str]] = {
+        "db_ids": set(),
+        "schema_ids": set(),
+        "table_ids": set(),
     }
+    if not zone_ids:
+        return found
+
+    for row in store().query_read(_accessible_ids_statement(list(zone_ids))):
+        if row["id"]:
+            found[row["kind"]].add(row["id"])
+    return found
 
 
 def resolve_accessible_catalog_ids(

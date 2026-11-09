@@ -1,44 +1,49 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the trusted Next.js-to-FastAPI identity contract."""
+"""The caller's name as routers read it."""
 
 import pytest
 from fastapi import HTTPException, Request
 
+from auto_ontology.hopsworks.identity import Caller
 from auto_ontology.server.identity import resolve_internal_user
 
 
-def _request(headers: dict[str, str]) -> Request:
-    return Request(
-        {
-            "type": "http",
-            "method": "POST",
-            "path": "/api/chat/completions",
-            "headers": [
-                (key.lower().encode("ascii"), value.encode("ascii"))
-                for key, value in headers.items()
-            ],
-        }
+def _request(caller: Caller | None) -> Request:
+    request = Request(
+        {"type": "http", "method": "POST", "path": "/api/tags", "headers": []}
+    )
+    if caller is not None:
+        request.state.caller = caller
+    return request
+
+
+def test_the_verified_caller_names_the_user() -> None:
+    assert (
+        resolve_internal_user(_request(Caller("meb10000", "admin")), required=True)
+        == "meb10000"
     )
 
 
-def test_forwarded_header_resolves_user() -> None:
-    user_id = resolve_internal_user(
-        _request({"x-auto-ontology-user-id": "user-1"}),
-        required=True,
-    )
-
-    assert user_id == "user-1"
+def test_a_missing_caller_is_none_when_optional() -> None:
+    assert resolve_internal_user(_request(None), required=False) is None
 
 
-def test_missing_required_identity_is_rejected() -> None:
+def test_a_missing_caller_is_refused_when_required() -> None:
     with pytest.raises(HTTPException) as exc_info:
-        resolve_internal_user(_request({}), required=True)
-
+        resolve_internal_user(_request(None), required=True)
     assert exc_info.value.status_code == 401
 
 
-def test_stateless_request_without_identity_remains_supported() -> None:
-    assert resolve_internal_user(_request({}), required=False) is None
+def test_a_client_header_is_not_an_identity() -> None:
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/tags",
+            "headers": [(b"x-auto-ontology-user-id", b"admin")],
+        }
+    )
+    assert resolve_internal_user(request, required=False) is None

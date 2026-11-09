@@ -31,10 +31,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import Text, and_, literal, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import ColumnElement, and_, select
 
 from auto_ontology.catalog.store import registry
+from auto_ontology.dal.ops import insert_returning, upsert
 from auto_ontology.dal.session import store
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 def _natural_key_predicate(
     spec: registry.EntitySpec, values: dict[str, Any], parent_id: str | None
-):
+) -> ColumnElement[bool]:
     """Build the WHERE that decides whether this row already exists."""
     clauses = []
     for part in spec.natural_key:
@@ -52,21 +52,14 @@ def _natural_key_predicate(
             clauses.append(spec.table.c[spec.parent_column] == parent_id)
             continue
 
-        column = spec.table.c[part]
         value = values.get(part)
-        transform = spec.key_expressions.get(part)
-        if transform is not None and value is not None:
-            # Both sides through the same function, so the expression index is
-            # usable -- Postgres matches an expression index syntactically, and
-            # `col = $1` does not match an index on `md5(col)`. The `md5` on the
-            # bind side is a per-row cost, not a per-table one.
-            #
-            # `value is not None` because `md5(NULL) = md5(NULL)` is NULL, not
-            # true; the direct comparison below renders `IS NULL`, which is what
-            # a caller matching on a missing value means.
-            clauses.append(transform(column) == transform(literal(value, Text)))
+        hashed = spec.hashed_keys.get(part)
+        # `value is not None` because the direct comparison renders `IS NULL`,
+        # which is what a caller matching on a missing value means.
+        if hashed is not None and value is not None:
+            clauses.append(spec.table.c[hashed] == registry.md5_hex(value))
         else:
-            clauses.append(column == value)
+            clauses.append(spec.table.c[part] == value)
     return and_(*clauses)
 
 
@@ -123,8 +116,7 @@ def upsert_row(
 ) -> str:
     """Create or update one row, returning its id.
 
-    Find-or-create, then update:
-    properties are written on insert, and *on_match* is applied when the row
+    Properties are written on insert, and *on_match* is applied when the row
     already existed — except for ``id``, which is never overwritten. See the
     module docstring for why that divergence is both necessary and free.
     """
@@ -137,61 +129,45 @@ def upsert_row(
     existing_id = resolve_id(label, match_props, parent_id=parent_id)
 
     if existing_id is None:
-        # Let the natural key arbitrate a race rather than checking first and
-        # inserting second: two ingestion threads can reach here at once.
-        conflict_target = _conflict_target(spec)
-        statement = insert(spec.table).values(**values)
-        if conflict_target:
-            skip = (
-                set(spec.natural_key)
-                | {spec.parent_column if p == "parent" else p for p in spec.natural_key}
-                # `id` is the primary key. Updating it on conflict rewrites the
-                # existing row's identity, dangling any id the caller already
-                # holds -- the same reason the match branch below refuses to
-                # overwrite it.
-                | {"id"}
+        if not spec.natural_key:
+            return insert_returning(spec.table, values, [spec.table.c.id])[0]["id"]
+        # The natural key arbitrates a race rather than a check-then-insert:
+        # two ingestion threads can reach here at once, and the loser's insert
+        # merges into the winner's row.
+        key = _conflict_key(spec)
+        natural_columns = {
+            spec.parent_column if part == "parent" else part
+            for part in spec.natural_key
+        }
+        # `id` is the primary key. Updating it on conflict rewrites the
+        # existing row's identity, dangling any id the caller already holds.
+        merged = [k for k in values if k not in {*key, *natural_columns, "id"}]
+        upsert(
+            spec.table,
+            values,
+            key=key,
+            set_=(lambda inserted: {k: inserted[k] for k in merged})
+            if merged
+            else None,
+        )
+        # Read back by the natural key from *values*, not *match_props*: a
+        # Table matched on a fresh id that lost the race to a same-named row
+        # lives under the winner's id.
+        rows = store().query_read(
+            select(spec.table.c.id).where(
+                _natural_key_predicate(spec, values, parent_id)
             )
-            update = {k: v for k, v in values.items() if k not in skip}
-            statement = (
-                statement.on_conflict_do_update(
-                    index_elements=conflict_target, set_=update
-                )
-                if update
-                else statement.on_conflict_do_nothing(index_elements=conflict_target)
-            )
-        rows = store().query_write(statement.returning(spec.table.c.id))
-        if rows:
-            return rows[0]["id"]
-        # No RETURNING row means DO NOTHING fired: someone else won the race
-        # and their row is the one that exists. Read it back.
-        raced_id = resolve_id(label, match_props, parent_id=parent_id)
-        if raced_id is None:
-            # Not reachable through a race -- the conflict proves a row is
-            # there. It means the natural key cannot find what the conflict
-            # target matched, i.e. the two disagree in the registry. Returning
-            # None here would satisfy the `-> str` annotation in name only and
-            # surface as a NOT NULL violation on the *next* insert, pointing at
-            # an innocent child row.
+        )
+        if not rows:
             raise RuntimeError(
-                f"{label}: insert conflicted but the row is not resolvable by "
-                f"its natural key {sorted(spec.natural_key)} -- the ON CONFLICT "
-                "target and the natural key disagree"
+                f"{label}: upserted on {key} but the row is not resolvable by "
+                f"its natural key {sorted(spec.natural_key)} -- the conflict "
+                "key and the natural key disagree"
             )
-        return raced_id
+        return rows[0]["id"]
 
     incoming_id = properties.get("id")
     if incoming_id and incoming_id != existing_id:
-        # An incoming id is never written over an existing row's. That is safe in a
-        # property graph, where relationships bind to internal nodes and `id` is
-        # just a property — but here `id` is the primary key and other rows
-        # reference it, so overwriting it violates their foreign keys.
-        #
-        # Not reproducing it loses nothing: the parser resolves ids out of the
-        # store before writing (get_table_ids / get_column_ids), so for Table
-        # and Column the id it carries is already the one on the row. Only
-        # nodes matched on something else — a Sql matched by its statement text
-        # — arrive with a freshly generated id, and for those keeping the
-        # stored id is the correct answer, not merely the safe one.
         logger.debug(
             "keeping stored id %s for %s rather than the incoming %s",
             existing_id,
@@ -208,23 +184,13 @@ def upsert_row(
         store().query_write(
             spec.table.update().where(spec.table.c.id == existing_id).values(**update)
         )
-        return existing_id
     return existing_id
 
 
-def _conflict_target(spec: registry.EntitySpec) -> list:
-    """What ``ON CONFLICT`` should name for this label.
-
-    Usually the natural key's columns, but ``sql_query`` is unique on
-    ``md5(sql_full_query)`` rather than the column itself — naming the column
-    there raises "no unique or exclusion constraint matching the ON CONFLICT
-    specification", because Postgres matches the target against an index.
-    """
-    if spec.conflict_expression is not None:
-        return [spec.conflict_expression]
-    if not spec.natural_key:
-        return []
-    columns = [
-        spec.parent_column if part == "parent" else part for part in spec.natural_key
+def _conflict_key(spec: registry.EntitySpec) -> list[str]:
+    """The unique key's columns behind the natural key: the parent column for
+    ``"parent"``, the stored hash for a hashed part."""
+    return [
+        spec.parent_column if part == "parent" else spec.hashed_keys.get(part, part)
+        for part in spec.natural_key
     ]
-    return [c for c in columns if c]

@@ -2,14 +2,9 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Read ingestion-service feature flags from the Auto Ontology metadata DB.
+"""The semantic-compilation switch, stored in ``configurations`` by Settings.
 
-The frontend manages these via Prisma (the ``configurations`` key/value table in
-the same Postgres instance the backend uses). We read them here with psycopg so
-the ingestion service can gate behaviour on them without a frontend round-trip.
-
-The history of individual compilation passes (start/end, success) is *not*
-kept here — it lives in the Auto Ontology-owned ``semantic_compilation_history`` table,
+The history of compilation passes lives in ``semantic_compilation_history``;
 see ``history.py``.
 """
 

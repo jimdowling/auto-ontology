@@ -6,7 +6,7 @@
 
 Two, deliberately. ``/health`` proves the dependencies are usable and backs
 **readiness**. ``/health/live`` proves only that this process is serving and
-backs **liveness** — a liveness probe that depends on Postgres asks the kubelet
+backs **liveness** — a liveness probe that depends on the store asks the kubelet
 to restart a healthy backend whenever the database is slow or its pool is
 saturated, which removes capacity exactly when there is least to spare and can
 kill a process mid-write.
@@ -33,7 +33,7 @@ router = APIRouter()
     include_in_schema=False,
     responses={
         200: {"model": HealthResponse, "description": "All dependencies reachable"},
-        503: {"model": HealthResponse, "description": "Postgres unreachable"},
+        503: {"model": HealthResponse, "description": "Store unreachable"},
     },
 )
 def health() -> JSONResponse:

@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tag CRUD on Postgres, and the objects a tag labels.
+"""Tag CRUD, and the objects a tag labels.
 
 Concentrated on the two parts of a tag that are not a plain row.
 
@@ -59,6 +59,7 @@ from sqlalchemy import Select, select  # noqa: E402
 from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.ops import insert_returning  # noqa: E402
 from auto_ontology.dal.pii import (  # noqa: E402
     mark_columns_pii_processed,
     realign_sql_attribute_pii,
@@ -88,6 +89,7 @@ from auto_ontology.dal.tags import (  # noqa: E402
     get_or_create_tag,
     get_tag,
     get_tag_by_name,
+    insert_labels,
     list_tag_targets,
     list_tags,
     remove_labels_no_longer_matched,
@@ -97,12 +99,12 @@ from auto_ontology.dal.tags import (  # noqa: E402
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM tag_target LIMIT 1")
+        store().query_read(select(s.tag_target.c.id).limit(1))
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable (migrations not applied): {exc}")
 
 
 @pytest.fixture
@@ -460,9 +462,7 @@ def test_existing_ids_of_nothing_asks_the_database_nothing() -> None:
 
 
 def _add(table, **values) -> str:
-    return store().query_write(table.insert().values(**values).returning(table.c.id))[
-        0
-    ]["id"]
+    return insert_returning(table, values, [table.c.id])[0]["id"]
 
 
 class Tagged:
@@ -844,13 +844,37 @@ def test_renaming_the_tag_leaves_its_labels_alone(tagged) -> None:
     assert [chip["name"] for chip in chips] == [f"{tagged.prefix}-gdpr"]
 
 
-def test_a_label_must_point_at_exactly_one_object(tagged) -> None:
-    """``exactly_one_target``: two targets in one row, or none, is neither."""
-    with pytest.raises(IntegrityError):
-        tagged.label(table_id=tagged.table, column_id=tagged.column)
+def test_a_label_must_point_at_an_object(tagged) -> None:
+    """The store has no CHECK for one target per row, so the DAL holds the rule.
 
-    with pytest.raises(IntegrityError):
-        tagged.label()
+    Every write path names one kind and so one column; an empty id is the only
+    way left to write a row labelling nothing, and it is refused before any
+    row of the batch is written.
+    """
+    with pytest.raises(ValueError, match="needs the id"):
+        attach_tag(tag_id=tagged.tag, kind=TARGET_TERM, item_id="")
+
+    with pytest.raises(ValueError, match="needs the id"):
+        attach_tags_by_rule(
+            rule_id=tagged.rule("empty-target"),
+            tag_ids=[tagged.tag],
+            targets=[(TARGET_TERM, tagged.term), (TARGET_TERM, None)],
+        )
+
+    assert list_tag_targets(tagged.tag) == []
+
+
+def test_insert_labels_counts_only_the_labels_it_wrote(tagged) -> None:
+    """A label already there is absorbed, keeps its source, and is not counted."""
+    attach_tag(
+        tag_id=tagged.tag, kind=TARGET_TERM, item_id=tagged.term, tagged_by="user-1"
+    )
+    second = _add(s.term, name=f"{tagged.prefix}-Customer")
+
+    assert insert_labels(TARGET_TERM, [tagged.tag], [tagged.term, second]) == 1
+    by_id = {row["id"]: row for row in list_tag_targets(tagged.tag)}
+    assert by_id[tagged.term]["tagged_by"] == "user-1"
+    assert by_id[second]["tagged_by"] is None
 
 
 def test_the_same_object_cannot_carry_a_tag_twice(tagged) -> None:
@@ -915,7 +939,7 @@ def test_the_map_resolves_every_object_in_one_pass(tagged) -> None:
 def test_the_map_chunks_id_lists_past_the_bind_batch(
     tagged, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A large ingest must not expand one ``IN`` past psycopg's bind cap."""
+    """A large ingest must not expand one ``IN`` past the batch size."""
     monkeypatch.setattr("auto_ontology.dal.tags.IN_QUERY_BATCH", 2)
     extras = [_add(s.term, name=f"{tagged.prefix}-T{i}") for i in range(5)]
     for term_id in extras:
@@ -993,7 +1017,8 @@ def test_attaching_the_same_tag_twice_is_not_an_error(tagged) -> None:
     """Two clicks on one tag are one intention, and the unique row holds.
 
     Straight through the constraint that ``test_the_same_object_cannot_carry_a
-    _tag_twice`` shows raising, so this pins the ``ON CONFLICT`` above it.
+    _tag_twice`` shows raising, so this pins the ``ON DUPLICATE KEY UPDATE``
+    above it.
     """
     first = attach_tag(tag_id=tagged.tag, kind=TARGET_TERM, item_id=tagged.term)
     again = attach_tag(tag_id=tagged.tag, kind=TARGET_TERM, item_id=tagged.term)
@@ -1746,7 +1771,7 @@ def test_a_kind_dropped_from_the_rule_loses_its_labels(tagged) -> None:
 
 
 def test_a_rule_applies_every_tag_it_holds(tagged) -> None:
-    """The tags travel as an array, so one statement is every tag on the kind."""
+    """The tags are joined to the match, so one statement is every tag on the kind."""
     second = create_tag(name=f"{tagged.prefix}-confidential")["id"]
 
     applied, _removed = _sync(
@@ -1759,8 +1784,34 @@ def test_a_rule_applies_every_tag_it_holds(tagged) -> None:
     assert len(list_tag_targets(second)) == 1
 
 
+def test_a_rule_matching_more_than_a_batch_labels_all_of_it(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Written a batch per transaction, under RonDB's cap on changed rows.
+
+    Five labels in batches of two: the last batch comes back short, which is
+    what ends the loop, and no batch repeats what an earlier one wrote.
+    """
+    monkeypatch.setattr("auto_ontology.dal.tags.IN_QUERY_BATCH", 2)
+    extras = {
+        _add(s.catalog_column, table_id=tagged.table, name=f"total_{i}")
+        for i in range(4)
+    }
+
+    applied, _removed = _sync(
+        rule_id=tagged.rule("batched"),
+        tag_ids=[tagged.tag],
+        targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
+    )
+
+    assert applied == 5
+    assert {row["id"] for row in list_tag_targets(tagged.tag)} == extras | {
+        tagged.column
+    }
+
+
 def test_the_same_tag_twice_is_one_label(tagged) -> None:
-    """The array is deduplicated before the statement sees it.
+    """Repeats collapse in the tag ids before a row is formed.
 
     The anti-join that keeps a re-apply cheap reads what is *stored*, so it
     cannot see a repeat inside the batch it is filtering.

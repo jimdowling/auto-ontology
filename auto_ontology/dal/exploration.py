@@ -4,9 +4,8 @@
 
 """The data- and semantic-layer Exploration graphs.
 
-Most of this module composes helpers that already exist — which is why the plan
-put it near the end. The semantic graph in particular is almost entirely calls
-into ``pg/terms`` and ``pg/sql_attributes``.
+Most of this module composes helpers that already exist. The semantic graph in
+particular is almost entirely calls into ``terms`` and ``sql_attributes``.
 
 **One invariant runs through all of it, and it is the thing worth protecting:**
 a table's ``relationship_count`` in the graph payload must equal the ``total``
@@ -26,7 +25,7 @@ import logging
 from collections import Counter
 from typing import Any
 
-from sqlalchemy import and_, func, literal, select
+from sqlalchemy import and_, func, literal, select, true, type_coerce
 
 from auto_ontology.catalog.constants import Edges, Labels
 from auto_ontology.dal import schema as s
@@ -51,6 +50,7 @@ from auto_ontology.dal.terms import (
     find_term_link_path,
     term_is_in_scope,
 )
+from auto_ontology.dal.types import JSONValue
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.utils.sample_values import stringify_sample_values
 from auto_ontology.semantic.constants import (
@@ -234,7 +234,7 @@ _MAX_REFERENCING_COLUMNS = 50
 def _visible_table(table_filter: list[str] | None):
     """``catalog_table`` is inside the accessible set, or ``True`` when unscoped."""
     if table_filter is None:
-        return literal(True)
+        return true()
     return s.catalog_table.c.id.in_(table_filter)
 
 
@@ -246,7 +246,7 @@ def _sql_in_scope(table_filter: list[str] | None):
     would otherwise leak the other half's names through its own text.
     """
     if table_filter is None:
-        return literal(True)
+        return true()
     return ~(
         select(literal(1))
         .select_from(s.sql_query__table)
@@ -329,8 +329,13 @@ def _term_table_links():
     return represents.union(via_attribute).subquery("term_table_link")
 
 
+def _rel_types(rel_type: Any) -> Any:
+    """Every ``rel_type`` in the group, as a list."""
+    return type_coerce(func.json_arrayagg(rel_type), JSONValue).label("rel_types")
+
+
 def _relationship_types(raw: Any) -> list[str]:
-    """The aggregated ``rel_type`` array as a sorted list of names."""
+    """The aggregated ``rel_type`` list as a sorted list of distinct names."""
     return sorted({value for value in (raw or []) if value})
 
 
@@ -477,7 +482,7 @@ def fetch_table_exploration_details(
             s.term.c.id,
             s.term.c.name,
             s.term.c.description,
-            func.array_agg(links.c.rel_type).label("rel_types"),
+            _rel_types(links.c.rel_type),
         )
         .select_from(links.join(s.term, s.term.c.id == links.c.term_id))
         .where(links.c.table_id == table_id)
@@ -541,7 +546,7 @@ def fetch_term_exploration_details(
         return {"tables": [], "tables_total": 0}
 
     page = (
-        select(*_TABLE_REF_COLUMNS, func.array_agg(links.c.rel_type).label("rel_types"))
+        select(*_TABLE_REF_COLUMNS, _rel_types(links.c.rel_type))
         .select_from(
             _table_catalog_join().join(links, links.c.table_id == s.catalog_table.c.id)
         )
@@ -606,9 +611,7 @@ def fetch_column_exploration_details(
         .select_from(owner)
         .where(
             owner.c.id == column_id,
-            literal(True)
-            if table_filter is None
-            else owner.c.table_id.in_(table_filter),
+            true() if table_filter is None else owner.c.table_id.in_(table_filter),
         )
         .exists()
     )
@@ -746,7 +749,7 @@ def fetch_column_attribute_exploration_details(
         return {"term": term, "columns": [], "columns_total": 0}
 
     page = (
-        select(*_COLUMN_REF_COLUMNS, func.array_agg(link.c.rel_type).label("rel_types"))
+        select(*_COLUMN_REF_COLUMNS, _rel_types(link.c.rel_type))
         .select_from(linked_columns)
         .where(*conditions)
         .group_by(*_COLUMN_REF_COLUMNS)

@@ -9,16 +9,17 @@ byte after normalisation. This is what catches a read that still returns *a*
 plausible answer after a change, rather than the right one.
 
 **Re-recording is a last resort, not a fix.** A golden that changes because the
-code changed is the test doing its job::
+code changed is the test doing its job. Re-record only when a change to DAL
+output is *intended*, against a store seeded with the fixture::
 
-    docker compose up -d postgres
+    docker compose up -d postgres   # the pagila source database
     uv run --no-sync python -m dev_tools.fixtures.seed_fixtures
     uv run --no-sync python -m dev_tools.fixtures.seed_graph_fixture --reset
-    uv run --no-sync pytest auto_ontology/dal/tests/test_golden.py
-
-Re-record only when a change to DAL output is *intended*::
-
     uv run --no-sync python -m dev_tools.fixtures.capture_dal_golden
+
+The replay needs that fixture in the store the tests use, and the session
+fixture in ``auto_ontology/conftest.py`` rebuilds every table first, so the
+replay skips. TODO(HWORKS-3744): seed the fixture inside the session.
 
 Results are normalised before comparison — ids become stable tokens, timestamps
 are redacted, and undirected edges are oriented consistently. See
@@ -46,8 +47,8 @@ def _require_fixture():
     Worth remembering as a shape: a skip guard naming the wrong dependency
     turns a whole suite off silently, and still reports green.
     """
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_USER not set; the golden fixture is unavailable")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set; the golden fixture is unavailable")
     try:
         return capture_dal_golden.capture_all()
     except SystemExit as exc:  # _fixture_ids() raises this when unseeded
@@ -95,11 +96,11 @@ def test_no_capture_raised() -> None:
     assert GOLDEN["errors"] == {}, f"captures raised: {GOLDEN['errors']}"
 
 
-#: Keys whose *presence* legitimately differs under Postgres, per read.
+#: Keys whose *presence* legitimately differs in the relational store, per read.
 #:
 #: These two reads return "every property of the node". A node carries only the
-#: properties something set; a row carries every column of its table. So under
-#: Postgres an unset property is `null` rather than absent, defaults appear, and
+#: properties something set; a row carries every column of its table. So in a
+#: table an unset property is `null` rather than absent, defaults appear, and
 #: the parent foreign key is visible — while `created`, which the graph stamped
 #: on every node and **nothing reads**, is gone: the catalog tables do not carry
 #: it and adding a column to satisfy a golden would be the tail wagging the dog.

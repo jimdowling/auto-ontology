@@ -15,8 +15,6 @@ from auto_ontology.catalog.constants import TableTypes
 
 from auto_ontology.connectors.connection_string_factory import build_connection_string
 from auto_ontology.connectors.databricks import (
-    AUTH_SSO_FEDERATION,
-    AUTH_STORED_TOKEN,
     DatabricksDatabase,
     _parse_connection_string,
 )
@@ -32,9 +30,7 @@ def _connection_string(token: str = "secret") -> str:
 
 
 def test_parse_connection_string() -> None:
-    kwargs, catalog, auth_mode = _parse_connection_string(
-        _connection_string("secret/with@chars")
-    )
+    kwargs, catalog = _parse_connection_string(_connection_string("secret/with@chars"))
 
     assert kwargs == {
         "server_hostname": "example.databricks.com",
@@ -44,7 +40,6 @@ def test_parse_connection_string() -> None:
         "enable_telemetry": False,
     }
     assert catalog == "main"
-    assert auth_mode == AUTH_STORED_TOKEN
 
 
 def test_build_connection_string() -> None:
@@ -190,50 +185,6 @@ def test_live_databricks_connector_end_to_end() -> None:
         assert all(isinstance(frame, pd.DataFrame) for frame in metadata_frames)
     finally:
         database.close()
-
-
-def test_parse_connection_string_marks_sso_federation() -> None:
-    _kwargs, _catalog, auth_mode = _parse_connection_string(
-        _connection_string() + "&auth=sso"
-    )
-
-    assert auth_mode == AUTH_SSO_FEDERATION
-
-
-def test_build_connection_string_flags_exchanged_token() -> None:
-    """An exchanged token is marked so the connector can log which one it used."""
-    federated = build_connection_string(
-        {
-            "type": "databricks",
-            "host": "example.databricks.com",
-            "http_path": "/sql/1.0/warehouses/w",
-            "password": "stored-pat",
-            "database": "main",
-            "access_token_override": "exchanged",
-        }
-    )
-    stored = build_connection_string(
-        {
-            "type": "databricks",
-            "host": "example.databricks.com",
-            "http_path": "/sql/1.0/warehouses/w",
-            "password": "stored-pat",
-            "database": "main",
-        }
-    )
-
-    assert federated.endswith("&auth=sso")
-    assert "auth=sso" not in stored
-    assert _parse_connection_string(federated)[2] == AUTH_SSO_FEDERATION
-    assert _parse_connection_string(stored)[2] == AUTH_STORED_TOKEN
-
-
-def test_auth_mode_property_reports_credential() -> None:
-    assert DatabricksDatabase(_connection_string()).auth_mode == AUTH_STORED_TOKEN
-    assert (
-        DatabricksDatabase(_connection_string() + "&auth=sso").auth_mode
-        == AUTH_SSO_FEDERATION
-    )
 
 
 def test_schema_condition_uses_equals_for_one_schema_and_in_for_many() -> None:

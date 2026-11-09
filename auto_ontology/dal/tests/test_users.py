@@ -28,6 +28,7 @@ pytest.importorskip("sqlalchemy")
 
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.types import new_id  # noqa: E402
 from auto_ontology.dal.users import (  # noqa: E402
     get_accessible_catalog_ids_for_zones,
     resolve_accessible_catalog_ids,
@@ -37,12 +38,12 @@ from auto_ontology.dal.users import (  # noqa: E402
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM zone_target LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.zone_target.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable: {exc}")
 
 
 @pytest.fixture
@@ -56,9 +57,10 @@ def catalog():
     prefix = f"z-{uuid.uuid4().hex[:8]}"
     ids: dict[str, str] = {"prefix": prefix}
 
-    def insert(table, **values):
-        row = store().query_write(table.insert().values(**values).returning(table.c.id))
-        return row[0]["id"]
+    def insert(table, **values) -> str:
+        values["id"] = new_id()
+        store().query_write(table.insert().values(**values))
+        return values["id"]
 
     for db_n in (1, 2):
         db_name = f"{prefix}-db{db_n}"
@@ -86,11 +88,10 @@ def catalog():
 
 
 def _zone_over(prefix: str, **target) -> str:
-    zone_id = store().query_write(
-        s.zone.insert()
-        .values(name=f"{prefix}-zone-{uuid.uuid4().hex[:8]}")
-        .returning(s.zone.c.id)
-    )[0]["id"]
+    zone_id = new_id()
+    store().query_write(
+        s.zone.insert().values(id=zone_id, name=f"{prefix}-zone-{uuid.uuid4().hex[:8]}")
+    )
     store().query_write(s.zone_target.insert().values(zone_id=zone_id, **target))
     return zone_id
 

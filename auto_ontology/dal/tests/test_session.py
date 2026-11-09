@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Transaction semantics for the Postgres DAL.
+"""Transaction semantics for the DAL's store.
 
 Runs against a **real
 database** rather than a ``MagicMock``. Mocking here would prove only that
@@ -14,10 +14,7 @@ wrong: concurrent threads must get genuinely separate transactions (ingestion
 fans out over a ``ThreadPoolExecutor``), and a spawned subprocess must not
 inherit pooled sockets (the chat worker is a separate process).
 
-Needs a migrated database and skips without one::
-
-    docker compose up -d postgres
-    uv run alembic upgrade head
+Needs a store and skips without one; see :mod:`auto_ontology.conftest`.
 """
 
 from __future__ import annotations
@@ -30,7 +27,10 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
+from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal import session as pg_session  # noqa: E402
+from auto_ontology.dal.types import new_id  # noqa: E402
+from auto_ontology.infra.mysql import mysql_url  # noqa: E402
 
 
 def _unique(prefix: str) -> str:
@@ -39,16 +39,14 @@ def _unique(prefix: str) -> str:
 
 @pytest.fixture(scope="module", autouse=True)
 def require_database():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
         rows = pg_session.store().query_read("SELECT 1 AS ok")
         assert rows == [{"ok": 1}]
-        pg_session.store().query_read("SELECT 1 FROM term LIMIT 1")
+        pg_session.store().query_read(f"SELECT 1 FROM {s.term.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001 — unmigrated or unreachable
-        pytest.skip(
-            f"auto_ontology schema unavailable (run alembic upgrade head): {exc}"
-        )
+        pytest.skip(f"auto_ontology schema unavailable: {exc}")
     yield
     pg_session.dispose_engine()
 
@@ -57,19 +55,22 @@ def require_database():
 def clean_terms():
     """Remove anything a test inserted, whatever it did to the transaction."""
     yield
-    pg_session.store().query_write("DELETE FROM term WHERE name LIKE 'tx-test-%'")
+    pg_session.store().query_write(
+        f"DELETE FROM {s.term.name} WHERE name LIKE 'tx-test-%'"
+    )
 
 
 def _insert_term(name: str) -> None:
     pg_session.store().query_write(
-        "INSERT INTO term (name, description) VALUES (:name, 'transaction test')",
-        {"name": name},
+        f"INSERT INTO {s.term.name} (id, name, description) "
+        "VALUES (:id, :name, 'transaction test')",
+        {"id": new_id(), "name": name},
     )
 
 
 def _term_exists(name: str) -> bool:
     rows = pg_session.store().query_read(
-        "SELECT 1 AS found FROM term WHERE name = :name",
+        f"SELECT 1 AS found FROM {s.term.name} WHERE name = :name",
         {"name": name},
     )
     return bool(rows)
@@ -184,6 +185,6 @@ def test_dispose_engine_is_idempotent() -> None:
     assert pg_session.store().query_read("SELECT 1 AS ok") == [{"ok": 1}]
 
 
-def test_url_is_pinned_to_psycopg3() -> None:
-    """A bare postgresql:// URL resolves to psycopg2, which is not installed."""
-    assert pg_session.sqlalchemy_url().startswith("postgresql+psycopg://")
+def test_url_is_pinned_to_pymysql() -> None:
+    """A bare mysql:// URL resolves to mysqlclient, which is not installed."""
+    assert mysql_url().drivername == "mysql+pymysql"

@@ -134,6 +134,7 @@ class MySQLDatabase(SQLDatabase):
             cursor = connection.cursor(dictionary=True)
             started = time.monotonic()
             try:
+                cursor.execute("SET SESSION TRANSACTION READ ONLY")
                 if timeout_s is not None:
                     self._set_statement_timeout(cursor, timeout_s)
                 cursor.execute(sql, parameters)

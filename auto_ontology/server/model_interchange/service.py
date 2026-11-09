@@ -23,7 +23,6 @@ from ossie_nvidia_auto_ontology import (
 
 from auto_ontology.connectors import get_connectors
 from auto_ontology.dal import model_interchange as dal
-from auto_ontology.dal.connections import list_connections
 from auto_ontology.server.model_interchange.embed import (
     ImportEmbedBuffer,
     flush_import_embeddings,
@@ -43,41 +42,24 @@ OSSIE_EXPORT_FILES = ("semantic_model.yaml", "ontology.yaml", "mapping.yaml")
 
 
 def _dialect_by_database_name() -> dict[str, str]:
-    """Resolve SQL dialect strings keyed by catalog database name.
+    """SQL dialects keyed by catalog database name, from the live connectors.
 
-    Live connectors give the most precise dialect, but building them connects
-    to every database, and one that cannot be reached would otherwise fail the
-    whole export. The dialect is informational in an export, so when that
-    happens the saved connection settings are used for every database instead.
+    The dialect is informational in an export, so a database whose connector
+    cannot be built is exported without one rather than failing the export.
     """
-    dialects: dict[str, str] = {}
     try:
         connectors = get_connectors()
     except Exception as exc:
         logger.warning(
-            "Could not connect to every configured database (%s); exporting "
-            "dialects from the saved connection settings instead",
-            exc,
+            "Could not build the connectors (%s); exporting no dialects", exc
         )
-        connectors = []
-    for connector in connectors:
-        database_name = getattr(connector, "database_name", None)
-        dialect = getattr(connector, "dialect", None)
-        if database_name and dialect:
-            dialects[str(database_name)] = str(dialect)
-
-    for connection in list_connections():
-        database_name = str(
-            connection.get("database")
-            or connection.get("database_name")
-            or connection.get("name")
-            or "",
-        )
-        if not database_name or database_name in dialects:
-            continue
-        dialect = connection.get("dialect") or connection.get("type") or ""
-        dialects[database_name] = str(dialect)
-    return dialects
+        return {}
+    return {
+        str(connector.database_name): str(connector.dialect)
+        for connector in connectors
+        if getattr(connector, "database_name", None)
+        and getattr(connector, "dialect", None)
+    }
 
 
 def detect_model_format(payload: Mapping[str, Any]) -> ModelFormat:

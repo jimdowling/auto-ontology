@@ -2,18 +2,27 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Postgres persistence and bounded history loading for chat conversations."""
+"""Persistence and bounded history loading for chat conversations.
+
+A conversation belongs to the Hopsworks member who started it; every read and
+write here is scoped by ``user_id`` (a username), and a conversation owned by
+someone else reads as absent. Messages have no foreign key to their
+conversation (NDB refuses TEXT on cascade children), so deleting a
+conversation deletes its messages in the same transaction.
+"""
 
 from __future__ import annotations
 
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
-import psycopg
-from psycopg.rows import dict_row
+from sqlalchemy import select
 
-from auto_ontology.infra.postgres import FRONTEND_SCHEMA, get_postgres_connection_string
+from auto_ontology.dal import schema as s
+from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.dal.types import new_id, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +31,23 @@ _MAX_HISTORY_CHARS = 12_000
 _MAX_QUESTION_CHARS = 2_000
 _MAX_RESPONSE_CHARS = 4_000
 _MAX_SQL_CHARS = 6_000
+
+_CONVERSATION_COLUMNS = (
+    s.conversations.c.id,
+    s.conversations.c.user_id,
+    s.conversations.c.title,
+    s.conversations.c.created_at,
+    s.conversations.c.updated_at,
+)
+_MESSAGE_COLUMNS = (
+    s.messages.c.id,
+    s.messages.c.conversation_id,
+    s.messages.c.role,
+    s.messages.c.content,
+    s.messages.c.sql_code,
+    s.messages.c.sql_response,
+    s.messages.c.created_at,
+)
 
 
 class ConversationAccessError(Exception):
@@ -90,6 +116,25 @@ def _rows_to_history(rows: list[dict]) -> list[ConversationTurn]:
     return list(reversed(selected))
 
 
+def _owned(conversation_id: str, user_id: str) -> bool:
+    return bool(
+        store().query_read(
+            select(s.conversations.c.id).where(
+                s.conversations.c.id == conversation_id,
+                s.conversations.c.user_id == user_id,
+            )
+        )
+    )
+
+
+def _touch(conversation_id: str) -> None:
+    store().query_write(
+        s.conversations.update()
+        .where(s.conversations.c.id == conversation_id)
+        .values(updated_at=utcnow())
+    )
+
+
 def prepare_conversation(
     *,
     conversation_id: uuid.UUID,
@@ -97,62 +142,53 @@ def prepare_conversation(
     question: str,
     source: str,
 ) -> PreparedConversation:
-    """Verify/create a conversation, load prior turns, then persist the user turn."""
+    """Verify/create a conversation, load prior turns, then persist the user turn.
 
+    Raises :class:`ConversationAccessError` when the id names another user's
+    conversation.
+    """
     conversation_str = str(conversation_id)
-    analytics_id = str(uuid.uuid4())
-    with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                f"""
-                INSERT INTO {FRONTEND_SCHEMA}.conversations (id, user_id, title, created_at, updated_at)
-                VALUES (%s, %s, %s, NOW(), NOW())
-                ON CONFLICT (id) DO NOTHING
-                RETURNING user_id
-                """,
-                (conversation_str, user_id, question[:50] or "New conversation"),
-            )
-            owner = cur.fetchone()
-            if owner is None:
-                cur.execute(
-                    f"SELECT user_id FROM {FRONTEND_SCHEMA}.conversations WHERE id = %s FOR UPDATE",
-                    (conversation_str,),
+    analytics_id = new_id()
+    with write_transaction():
+        owner = store().query_read(
+            select(s.conversations.c.user_id)
+            .where(s.conversations.c.id == conversation_str)
+            .with_for_update()
+        )
+        if not owner:
+            store().query_write(
+                s.conversations.insert().values(
+                    id=conversation_str,
+                    user_id=user_id,
+                    title=question[:50] or "New conversation",
                 )
-                owner = cur.fetchone()
-            if owner is None or owner["user_id"] != user_id:
-                raise ConversationAccessError(conversation_str)
+            )
+        elif owner[0]["user_id"] != user_id:
+            raise ConversationAccessError(conversation_str)
 
-            cur.execute(
-                f"""
-                SELECT role, content, sql_code, sql_response
-                FROM {FRONTEND_SCHEMA}.messages
-                WHERE conversation_id = %s
-                ORDER BY created_at ASC, id ASC
-                """,
-                (conversation_str,),
+        rows = store().query_read(
+            select(
+                s.messages.c.role,
+                s.messages.c.content,
+                s.messages.c.sql_code,
+                s.messages.c.sql_response,
             )
-            history = _rows_to_history([dict(row) for row in cur.fetchall()])
+            .where(s.messages.c.conversation_id == conversation_str)
+            .order_by(s.messages.c.created_at, s.messages.c.id)
+        )
+        history = _rows_to_history(rows)
 
-            cur.execute(
-                f"""
-                INSERT INTO {FRONTEND_SCHEMA}.messages
-                    (id, conversation_id, role, content, created_at)
-                VALUES (%s, %s, 'user', %s, NOW())
-                """,
-                (str(uuid.uuid4()), conversation_str, question),
+        store().query_write(
+            s.messages.insert().values(
+                conversation_id=conversation_str, role="user", content=question
             )
-            cur.execute(
-                f"""
-                INSERT INTO {FRONTEND_SCHEMA}.conversation_analytics
-                    (id, user_id, source, question, question_timestamp)
-                VALUES (%s, %s, %s, %s, NOW())
-                """,
-                (analytics_id, user_id, source, question),
+        )
+        store().query_write(
+            s.conversation_analytics.insert().values(
+                id=analytics_id, user_id=user_id, source=source, question=question
             )
-            cur.execute(
-                f"UPDATE {FRONTEND_SCHEMA}.conversations SET updated_at = NOW() WHERE id = %s",
-                (conversation_str,),
-            )
+        )
+        _touch(conversation_str)
 
     return PreparedConversation(history=history, analytics_id=analytics_id)
 
@@ -166,36 +202,20 @@ def persist_assistant_result(
     sql_code: str | None,
 ) -> None:
     """Persist one final assistant turn and complete its analytics row."""
-
     conversation_str = str(conversation_id)
-    with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT 1 FROM {FRONTEND_SCHEMA}.conversations WHERE id = %s AND user_id = %s",
-                (conversation_str, user_id),
+    with write_transaction():
+        if not _owned(conversation_str, user_id):
+            raise ConversationAccessError(conversation_str)
+        store().query_write(
+            s.messages.insert().values(
+                conversation_id=conversation_str,
+                role="assistant",
+                content=response,
+                sql_code=sql_code,
             )
-            if cur.fetchone() is None:
-                raise ConversationAccessError(conversation_str)
-            cur.execute(
-                f"""
-                INSERT INTO {FRONTEND_SCHEMA}.messages
-                    (id, conversation_id, role, content, sql_code, created_at)
-                VALUES (%s, %s, 'assistant', %s, %s, NOW())
-                """,
-                (str(uuid.uuid4()), conversation_str, response, sql_code),
-            )
-            cur.execute(
-                f"""
-                UPDATE {FRONTEND_SCHEMA}.conversation_analytics
-                SET response = %s, sql = %s, response_timestamp = NOW()
-                WHERE id = %s AND user_id = %s
-                """,
-                (response, sql_code, analytics_id, user_id),
-            )
-            cur.execute(
-                f"UPDATE {FRONTEND_SCHEMA}.conversations SET updated_at = NOW() WHERE id = %s",
-                (conversation_str,),
-            )
+        )
+        _complete_analytics(analytics_id, user_id, response, sql_code)
+        _touch(conversation_str)
 
 
 def persist_result_message(
@@ -208,50 +228,46 @@ def persist_result_message(
     """Persist the chart/table bubble ("Message 2") for a completed turn.
 
     Called unconditionally from ``_pump`` so this bubble is guaranteed to
-    exist — same guarantee ``persist_assistant_result`` already gives the
-    SQL answer — instead of depending on a browser tab staying around to
+    exist -- same guarantee ``persist_assistant_result`` already gives the
+    SQL answer -- instead of depending on a browser tab staying around to
     ask for it.
     """
-
     conversation_str = str(conversation_id)
-    with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT 1 FROM {FRONTEND_SCHEMA}.conversations "
-                "WHERE id = %s AND user_id = %s",
-                (conversation_str, user_id),
+    with write_transaction():
+        if not _owned(conversation_str, user_id):
+            raise ConversationAccessError(conversation_str)
+        store().query_write(
+            s.messages.insert().values(
+                conversation_id=conversation_str,
+                role="assistant",
+                content=content,
+                sql_response=sql_response,
             )
-            if cur.fetchone() is None:
-                raise ConversationAccessError(conversation_str)
-            cur.execute(
-                f"""
-                INSERT INTO {FRONTEND_SCHEMA}.messages
-                    (id, conversation_id, role, content, sql_response, created_at)
-                VALUES (%s, %s, 'assistant', %s, %s, NOW())
-                """,
-                (str(uuid.uuid4()), conversation_str, content, sql_response),
-            )
-            cur.execute(
-                f"UPDATE {FRONTEND_SCHEMA}.conversations "
-                "SET updated_at = NOW() WHERE id = %s",
-                (conversation_str,),
-            )
+        )
+        _touch(conversation_str)
+
+
+def _complete_analytics(
+    analytics_id: str, user_id: str, response: str, sql_code: str | None
+) -> None:
+    store().query_write(
+        s.conversation_analytics.update()
+        .where(
+            s.conversation_analytics.c.id == analytics_id,
+            s.conversation_analytics.c.user_id == user_id,
+        )
+        .values(response=response, sql=sql_code, response_timestamp=utcnow())
+    )
 
 
 def create_stateless_analytics(*, user_id: str, question: str, source: str) -> str:
     """Create analytics for an authenticated one-shot request."""
-
-    analytics_id = str(uuid.uuid4())
-    with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                INSERT INTO {FRONTEND_SCHEMA}.conversation_analytics
-                    (id, user_id, source, question, question_timestamp)
-                VALUES (%s, %s, %s, %s, NOW())
-                """,
-                (analytics_id, user_id, source, question),
-            )
+    analytics_id = new_id()
+    store().query_write(
+        s.conversation_analytics.insert().values(
+            id=analytics_id, user_id=user_id, source=source, question=question
+        )
+    )
     return analytics_id
 
 
@@ -263,26 +279,139 @@ def persist_analytics_result(
     sql_code: str | None,
 ) -> None:
     """Complete an analytics row for a stateless authenticated request."""
+    _complete_analytics(analytics_id, user_id, response, sql_code)
 
-    with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                UPDATE {FRONTEND_SCHEMA}.conversation_analytics
-                SET response = %s, sql = %s, response_timestamp = NOW()
-                WHERE id = %s AND user_id = %s
-                """,
-                (response, sql_code, analytics_id, user_id),
+
+def list_conversations(user_id: str) -> list[dict[str, Any]]:
+    """The user's conversations, newest first, without messages."""
+    return store().query_read(
+        select(*_CONVERSATION_COLUMNS)
+        .where(s.conversations.c.user_id == user_id)
+        .order_by(s.conversations.c.created_at.desc())
+    )
+
+
+def create_conversation(user_id: str, title: str = "") -> dict[str, Any]:
+    """Start an empty conversation owned by ``user_id``."""
+    conversation_id = new_id()
+    with write_transaction():
+        store().query_write(
+            s.conversations.insert().values(
+                id=conversation_id, user_id=user_id, title=title
             )
+        )
+        return store().query_read(
+            select(*_CONVERSATION_COLUMNS).where(
+                s.conversations.c.id == conversation_id
+            )
+        )[0]
+
+
+def get_conversation(conversation_id: str, user_id: str) -> dict[str, Any] | None:
+    """The conversation with its messages oldest first, or ``None`` when the
+    user owns no conversation with that id."""
+    rows = store().query_read(
+        select(*_CONVERSATION_COLUMNS).where(
+            s.conversations.c.id == conversation_id,
+            s.conversations.c.user_id == user_id,
+        )
+    )
+    if not rows:
+        return None
+    conversation = dict(rows[0])
+    conversation["messages"] = store().query_read(
+        select(*_MESSAGE_COLUMNS)
+        .where(s.messages.c.conversation_id == conversation_id)
+        .order_by(s.messages.c.created_at, s.messages.c.id)
+    )
+    return conversation
+
+
+def rename_conversation(
+    conversation_id: str, user_id: str, title: str
+) -> dict[str, Any] | None:
+    """Set the title; ``None`` when the user owns no such conversation."""
+    with write_transaction():
+        if not _owned(conversation_id, user_id):
+            return None
+        store().query_write(
+            s.conversations.update()
+            .where(s.conversations.c.id == conversation_id)
+            .values(title=title)
+        )
+        return store().query_read(
+            select(*_CONVERSATION_COLUMNS).where(
+                s.conversations.c.id == conversation_id
+            )
+        )[0]
+
+
+def delete_conversation(conversation_id: str, user_id: str) -> bool:
+    """Delete the conversation and its messages; ``False`` when not owned."""
+    with write_transaction():
+        if not _owned(conversation_id, user_id):
+            return False
+        store().query_write(
+            s.messages.delete().where(s.messages.c.conversation_id == conversation_id)
+        )
+        store().query_write(
+            s.conversations.delete().where(s.conversations.c.id == conversation_id)
+        )
+        return True
+
+
+def add_message(
+    conversation_id: str,
+    user_id: str,
+    *,
+    role: str,
+    content: str = "",
+    sql_code: str | None = None,
+    sql_response: str | None = None,
+) -> dict[str, Any] | None:
+    """Append a message; ``None`` when the user owns no such conversation."""
+    message_id = new_id()
+    with write_transaction():
+        if not _owned(conversation_id, user_id):
+            return None
+        store().query_write(
+            s.messages.insert().values(
+                id=message_id,
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                sql_code=sql_code,
+                sql_response=sql_response,
+            )
+        )
+        _touch(conversation_id)
+        return store().query_read(
+            select(*_MESSAGE_COLUMNS).where(s.messages.c.id == message_id)
+        )[0]
+
+
+def conversation_owner(conversation_id: str) -> str | None:
+    """The username owning the conversation, or ``None`` when it does not exist."""
+    rows = store().query_read(
+        select(s.conversations.c.user_id).where(s.conversations.c.id == conversation_id)
+    )
+    return rows[0]["user_id"] if rows else None
 
 
 __all__ = [
     "ConversationAccessError",
     "ConversationTurn",
     "PreparedConversation",
+    "add_message",
+    "conversation_owner",
+    "create_conversation",
     "create_stateless_analytics",
+    "delete_conversation",
+    "get_conversation",
+    "list_conversations",
     "persist_analytics_result",
     "persist_assistant_result",
     "persist_result_message",
     "prepare_conversation",
+    "rename_conversation",
 ]

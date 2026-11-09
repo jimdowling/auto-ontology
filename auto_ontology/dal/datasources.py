@@ -19,24 +19,27 @@ Two shapes recur and are easy to break:
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import pandas as pd
 from sqlalchemy import (
     ColumnElement,
+    Subquery,
     Text,
     and_,
     case,
-    column,
     distinct,
     func,
     literal,
     select,
+    union_all,
     update,
 )
-from sqlalchemy import values as sa_values
+from sqlalchemy.types import TypeEngine
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import chunks
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
     column_description_expr,
@@ -52,6 +55,13 @@ from auto_ontology.utils.sample_values import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Column order within a table. A column with no position sorts last; MySQL
+#: alone would put NULL first.
+_ORDINAL_ORDER = (
+    s.catalog_column.c.ordinal_position.is_(None),
+    s.catalog_column.c.ordinal_position,
+)
 
 #: Labels ``fetch_node_properties_by_id`` will look up, and their tables.
 _NODE_TABLES = {
@@ -557,6 +567,29 @@ def mark_table_as_junction(table_id: str) -> None:
     )
 
 
+def _incoming(
+    columns: Sequence[tuple[str, TypeEngine]], rows: Sequence[Sequence[Any]]
+) -> Subquery:
+    """*rows* as a derived table named ``incoming``, for an UPDATE to join.
+
+    MySQL takes no ``VALUES`` list in ``FROM``, so each row is a ``SELECT`` of
+    literals. Each literal carries its target column's type, so a
+    :class:`~auto_ontology.dal.types.Bounded` value is cut on the way in as a
+    plain write would cut it.
+    """
+    return union_all(
+        *(
+            select(
+                *(
+                    literal(value, type_).label(name)
+                    for (name, type_), value in zip(columns, row, strict=True)
+                )
+            )
+            for row in rows
+        )
+    ).subquery("incoming")
+
+
 def apply_metadata_batch(
     database_name: str,
     table_rows: list[dict],
@@ -567,42 +600,42 @@ def apply_metadata_batch(
     ``coalesce(new, existing)``, and the direction matters: a curated
     description survives a batch that has nothing to say about it.
 
-    Two statements, both ``UPDATE ... FROM (VALUES ...)``, in one transaction.
-    A row-at-a-time loop was one autocommitted round trip per table *and* per
-    column -- thousands for a warehouse-sized profiling run, each paying the
-    network latency in full, and each leaving a partial batch behind for good
-    if the run died halfway. The set-based form also evaluates the
-    database-scoping subquery once instead of once per row.
+    ``UPDATE ... JOIN`` against the batch, ``IN_QUERY_BATCH`` rows per
+    statement, all in one transaction. A row-at-a-time loop was one
+    autocommitted round trip per table *and* per column -- thousands for a
+    warehouse-sized profiling run, each paying the network latency in full, and
+    each leaving a partial batch behind for good if the run died halfway. The
+    one transaction must stay under RonDB's 32768 changed rows.
 
-    Note this makes a duplicated key within one batch indeterminate rather than
-    last-wins: Postgres updates a target row at most once per statement, so of
-    two rows naming the same column, one is applied and the other dropped.
-    Callers build these from a catalog read, where the names are already unique.
+    A table name matches that name in every schema of the database. A key
+    repeated within one statement updates its row once, with either row's
+    values; callers build these from a catalog read, where the names are
+    already unique.
     """
     with write_transaction():
-        if table_rows:
-            incoming = sa_values(
-                column("table_name", Text),
-                column("description", Text),
-                name="incoming",
-            ).data([(row["table_name"], row.get("description")) for row in table_rows])
+        for batch in chunks(table_rows or []):
+            incoming = _incoming(
+                [
+                    ("table_name", Text()),
+                    ("description", s.catalog_table.c.description.type),
+                ],
+                [(row["table_name"], row.get("description")) for row in batch],
+            )
             store().query_write(
                 update(s.catalog_table)
                 .where(
-                    and_(
-                        s.catalog_table.c.name == incoming.c.table_name,
-                        s.catalog_table.c.schema_id.in_(
-                            select(s.catalog_schema.c.id)
-                            .select_from(
-                                s.catalog_schema.join(
-                                    s.catalog_database,
-                                    s.catalog_schema.c.database_id
-                                    == s.catalog_database.c.id,
-                                )
+                    s.catalog_table.c.name == incoming.c.table_name,
+                    s.catalog_table.c.schema_id.in_(
+                        select(s.catalog_schema.c.id)
+                        .select_from(
+                            s.catalog_schema.join(
+                                s.catalog_database,
+                                s.catalog_schema.c.database_id
+                                == s.catalog_database.c.id,
                             )
-                            .where(s.catalog_database.c.name == database_name)
-                        ),
-                    )
+                        )
+                        .where(s.catalog_database.c.name == database_name)
+                    ),
                 )
                 .values(
                     description=func.coalesce(
@@ -611,14 +644,14 @@ def apply_metadata_batch(
                 )
             )
 
-        if column_rows:
-            incoming = sa_values(
-                column("table_name", Text),
-                column("column_name", Text),
-                column("description", Text),
-                column("sample_values", Text),
-                name="incoming",
-            ).data(
+        for batch in chunks(column_rows or []):
+            incoming = _incoming(
+                [
+                    ("table_name", Text()),
+                    ("column_name", Text()),
+                    ("description", s.catalog_column.c.description.type),
+                    ("sample_values", s.catalog_column.c.sample_values.type),
+                ],
                 [
                     (
                         row["table_name"],
@@ -626,33 +659,28 @@ def apply_metadata_batch(
                         row.get("description"),
                         row.get("sample_values"),
                     )
-                    for row in column_rows
-                ]
+                    for row in batch
+                ],
             )
             store().query_write(
                 update(s.catalog_column)
                 .where(
-                    and_(
-                        s.catalog_column.c.name == incoming.c.column_name,
-                        s.catalog_column.c.table_id.in_(
-                            select(s.catalog_table.c.id)
-                            .select_from(_table_join())
-                            .where(
-                                and_(
-                                    s.catalog_database.c.name == database_name,
-                                    s.catalog_table.c.name == incoming.c.table_name,
-                                )
-                            )
-                        ),
-                    )
+                    s.catalog_column.c.name == incoming.c.column_name,
+                    s.catalog_column.c.table_id == s.catalog_table.c.id,
+                    s.catalog_table.c.name == incoming.c.table_name,
+                    s.catalog_table.c.schema_id == s.catalog_schema.c.id,
+                    s.catalog_schema.c.database_id == s.catalog_database.c.id,
+                    s.catalog_database.c.name == database_name,
                 )
                 .values(
-                    description=func.coalesce(
-                        incoming.c.description, s.catalog_column.c.description
-                    ),
-                    sample_values=func.coalesce(
-                        incoming.c.sample_values, s.catalog_column.c.sample_values
-                    ),
+                    {
+                        s.catalog_column.c.description: func.coalesce(
+                            incoming.c.description, s.catalog_column.c.description
+                        ),
+                        s.catalog_column.c.sample_values: func.coalesce(
+                            incoming.c.sample_values, s.catalog_column.c.sample_values
+                        ),
+                    }
                 )
             )
 
@@ -930,7 +958,7 @@ def fetch_columns_for_table(
         # a stable page order -- two columns sharing a position could swap
         # between page 1 and page 2, showing one twice and the other never. `id`
         # breaks the tie.
-        .order_by(s.catalog_column.c.ordinal_position, s.catalog_column.c.id)
+        .order_by(*_ORDINAL_ORDER, s.catalog_column.c.id)
         .offset(skip)
     )
     if limit is not None:
@@ -1044,7 +1072,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 )
             )
             .where(s.catalog_table.c.id.in_(list(table_ids)))
-            .order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
+            .order_by(s.catalog_table.c.id, *_ORDINAL_ORDER)
         )
     except Exception:
         logger.warning("fetch_tables_by_ids: query failed", exc_info=True)
@@ -1122,7 +1150,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
                 is_fk_target.label("is_foreign_key_target"),
             )
             .where(s.catalog_column.c.table_id == table_id)
-            .order_by(s.catalog_column.c.ordinal_position, s.catalog_column.c.id)
+            .order_by(*_ORDINAL_ORDER, s.catalog_column.c.id)
         )
     ]
 

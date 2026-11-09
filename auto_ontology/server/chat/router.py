@@ -87,6 +87,8 @@ from fastapi.responses import StreamingResponse
 from auto_ontology.dal import datasources as datasources_dal
 from auto_ontology.dal.terms import semantic_layer_calculated
 from auto_ontology.retrieval.text_to_sql.visualization import analyze_and_visualize
+from auto_ontology.server import capacity
+from auto_ontology.server.authz import current_caller, has_permission
 from auto_ontology.server.chat.helpers import (
     NODE_LABELS,
     ChatRequest,
@@ -276,14 +278,14 @@ def _release(slot: _Slot) -> None:
     second is a no-op via ``slot.released``.
     """
 
-    if slot.released.is_set():
-        return
-    slot.released.set()
-    slot.client_alive.clear()
-
     with _slot_lock:
+        if slot.released.is_set():
+            return
+        slot.released.set()
         if _active_slots.get(slot.key) is slot:
             del _active_slots[slot.key]
+    slot.client_alive.clear()
+    capacity.release()
 
     pool = get_pool()
     if slot.cancelled.is_set():
@@ -474,35 +476,6 @@ def _pump(slot: _Slot) -> None:
         _release(slot)
 
 
-def _subject_token(http_request: Request) -> str | None:
-    """Return the caller's SSO JWT when a connection authenticates as the user.
-
-    The frontend forwards the browser user's SSO token (or a service caller's
-    own bearer token) as ``Authorization: Bearer``. Fail closed: when any
-    connection has "Authenticate as signed-in user" enabled, a request without a
-    token is rejected rather than allowed to run under that connection's PAT.
-    """
-    from auto_ontology.connectors.databricks_oauth import (
-        any_connection_uses_sso_federation,
-    )
-
-    if not any_connection_uses_sso_federation():
-        return None
-
-    header = http_request.headers.get("authorization") or ""
-    scheme, _, token = header.partition(" ")
-    token = token.strip()
-    if scheme.lower() != "bearer" or not token:
-        raise HTTPException(
-            status_code=401,
-            detail=(
-                "A connection is configured to authenticate as the signed-in "
-                "user, but the request carried no SSO bearer token."
-            ),
-        )
-    return token
-
-
 def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
     """Replay ``slot.buffer`` from the start, then tail it live.
 
@@ -568,21 +541,28 @@ async def chat_completions(
 
     target_db = await asyncio.to_thread(_resolve_chat_target_db, request.target_db)
 
-    # Conversation persistence trusts identity forwarded by the private Next.js
-    # gateway; only calls that persist (i.e. carry a conversation_id) need it.
     user_id = resolve_internal_user(
         http_request, required=request.conversation_id is not None
     )
+    if request.conversation_id is not None and not has_permission(
+        current_caller(http_request), "conversation:write"
+    ):
+        raise HTTPException(
+            status_code=403, detail="Missing permission: conversation:write"
+        )
     key = (
         f"{user_id}:{request.conversation_id}"
         if request.conversation_id is not None
         else str(uuid.uuid4())
     )
 
-    subject_token = _subject_token(http_request)
-
+    capacity.acquire()
     pool = get_pool()
-    worker = await asyncio.to_thread(pool.acquire)
+    try:
+        worker = await asyncio.to_thread(pool.acquire)
+    except BaseException:
+        capacity.release()
+        raise
     slot = _Slot(
         key=key,
         worker=worker,
@@ -602,6 +582,7 @@ async def chat_completions(
         # Lost the race against a still-connected sibling — return the
         # acquired worker to the pool so we don't waste its warm state.
         pool.return_alive(worker)
+        capacity.release()
         raise
 
     if displaced is not None:
@@ -656,7 +637,6 @@ async def chat_completions(
         request.question,
         prediction=request.prediction,
         target_db=target_db,
-        subject_token=subject_token,
         conversation_history=conversation_history,
         evidence=request.evidence,
     )

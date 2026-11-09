@@ -103,19 +103,6 @@ def test_an_uncancelled_pass_still_processes_everything() -> None:
     assert len(processed) == 8
 
 
-def test_scheduler_abort_requests_cancellation() -> None:
-    """``abort`` has to reach the worker threads, not just the loop's own flag."""
-    from auto_ontology.ingestion_service.semantic_scheduler import SemanticScheduler
-
-    scheduler = SemanticScheduler()
-    assert is_cancelled() is False
-
-    scheduler.abort()
-
-    assert is_cancelled() is True
-    assert scheduler.aborting is True
-
-
 def test_cancelling_a_backlog_larger_than_the_pool_drains_cleanly() -> None:
     """A backlog far larger than the pool still finishes, with nothing compiled."""
     request_cancel()  # every table skips, before any is dispatched

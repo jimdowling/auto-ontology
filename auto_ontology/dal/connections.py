@@ -2,100 +2,119 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""UI-managed database connections.
+"""The ontology's sources: the Hopsworks data sources its catalog is read from.
 
-Connection metadata lives on the catalog database row, so the UI connection and
-the catalog database are the same record and cannot drift apart. A database is a
-UI-managed connection when it has a ``connection`` value; the catalog name
-doubles as the connection's identity.
+A source lives on its catalog database row, so the source and the catalog
+database are the same record and cannot drift apart; the catalog name is the
+source's identity. The row's ``connection`` holds::
+
+    {"data_source": <Hopsworks data source name>,
+     "schemas": [<schema to ingest>, ...],   # empty: every schema
+     "table_regex": <regex a table name must match> | None}
+
+and never credentials: a connector reads those from the data source with the
+caller's Hopsworks identity when it is built.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from sqlalchemy import select, update
-from sqlalchemy.dialects.postgresql import insert
 
-from auto_ontology.connectors.vault import read_secret
+from auto_ontology.catalog.table_filter import compile_pattern
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import upsert
 from auto_ontology.dal.session import store
 
 logger = logging.getLogger(__name__)
 
+SOURCE_KEYS = frozenset({"data_source", "schemas", "table_regex"})
+
+
+def _source(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """*raw* as a stored source. Raises ``ValueError`` on any other key, which
+    is what keeps a host, user or password off the row."""
+    unknown = set(raw) - SOURCE_KEYS
+    if unknown:
+        raise ValueError(
+            f"a source holds only {sorted(SOURCE_KEYS)}, not {sorted(unknown)}: "
+            "credentials come from the Hopsworks data source"
+        )
+    data_source = raw.get("data_source")
+    if not isinstance(data_source, str) or not data_source.strip():
+        raise ValueError("a source needs the name of a Hopsworks data source")
+    schemas = raw.get("schemas") or []
+    if not isinstance(schemas, list) or not all(
+        isinstance(name, str) for name in schemas
+    ):
+        raise ValueError("a source's schemas are a list of schema names")
+    table_regex = raw.get("table_regex") or None
+    compile_pattern(table_regex, field="table_regex")
+    return {
+        "data_source": data_source.strip(),
+        "schemas": [name.strip() for name in schemas if name.strip()],
+        "table_regex": table_regex,
+    }
+
 
 def list_connections() -> list[dict[str, Any]]:
-    """Every catalog database's resolved connection.
+    """Every source, ordered by catalog database name.
 
-    Vault wins when it holds a secret for the database name; otherwise the
-    stored value is used. Databases with neither are skipped, which is what
-    makes this "connections" rather than "databases" — an ingested catalog with
-    no UI connection has nothing to return.
+    Each is the stored ``{"data_source", "schemas", "table_regex"}`` plus
+    ``database_name``. A catalog database with no source, such as one a model
+    import created, is skipped.
     """
-    connections: list[dict[str, Any]] = []
-    for row in store().query_read(
-        select(s.catalog_database.c.name, s.catalog_database.c.connection).order_by(
-            s.catalog_database.c.name
+    return [
+        {**row["connection"], "database_name": row["name"]}
+        for row in store().query_read(
+            select(s.catalog_database.c.name, s.catalog_database.c.connection)
+            .where(s.catalog_database.c.connection.isnot(None))
+            .order_by(s.catalog_database.c.name)
         )
-    ):
-        secret = read_secret(str(row["name"]))
-        if secret:
-            connections.append(secret)
-            continue
-        stored = row["connection"]
-        if stored:
-            # jsonb here, a JSON *string* on the graph node. Callers get the
-            # object either way, so decoding a string keeps a database written
-            # before this column existed readable.
-            connections.append(
-                json.loads(stored) if isinstance(stored, str) else stored
-            )
-    return connections
+    ]
 
 
 def insert_connection(
     *,
-    connection: str,
+    connection: str | Mapping[str, Any],
     database_name: str,
 ) -> dict[str, Any]:
-    """Attach connection metadata to the catalog database, creating it if needed.
+    """Set the source of a catalog database, creating the row if needed, and
+    return the row.
 
-    Creating it matters: a connection is normally configured *before* anything
-    is ingested, so there is usually no database row to attach to yet.
+    Creating it matters: a source is normally configured *before* anything is
+    ingested, so there is usually no database row to attach to yet.
+    *connection* is the source as a mapping or its JSON text. Raises
+    ``ValueError`` when it is not a valid source (see the module docstring).
     """
-    # An empty string means "no connection JSON on the row" -- the Vault path
-    # writes the credentials to Vault and deliberately keeps them off the
-    # catalog. `json.loads("")` raises, and because the Vault write happens
-    # first, the secret was already stored when the insert 500s: no
-    # catalog_database row, so the connection is invisible to list_connections
-    # and cannot be ingested.
-    payload = json.loads(connection) if connection and connection.strip() else None
-    statement = insert(s.catalog_database).values(
-        name=database_name, connection=payload
-    )
-    rows = store().query_write(
-        statement.on_conflict_do_update(
-            index_elements=[s.catalog_database.c.name],
-            set_={"connection": statement.excluded.connection},
-        ).returning(s.catalog_database)
-    )
-    return dict(rows[0])
+    raw = json.loads(connection) if isinstance(connection, str) else connection
+    if not isinstance(raw, Mapping):
+        raise ValueError("a source is a JSON object")
+    source = _source(raw)
+    return upsert(
+        s.catalog_database,
+        {"name": database_name, "connection": source},
+        key=["name"],
+        set_=lambda inserted: {"connection": inserted.connection},
+        returning=list(s.catalog_database.c),
+    )[0]
 
 
 def clear_connection(*, database_name: str) -> None:
-    """Detach connection metadata from the catalog database.
+    """Detach the source from the catalog database.
 
     The counterpart to :func:`insert_connection`, and the write that actually
-    makes a database stop being a connection — "connections" are exactly the
-    catalog rows carrying a connection value.
+    makes a database stop being a source — sources are exactly the catalog
+    rows carrying a ``connection`` value.
 
-    The row itself stays. ``catalog_schema`` cascades off it, so deleting it
-    here would drop the ingested catalog while leaving behind the semantic rows
-    and pgvector embeddings that are identified *through* it — the half-state
-    :func:`auto_ontology.dal.reset.delete_all_data` orders its own deletes to avoid.
-    Tearing the graph down is that function's job.
+    The row itself stays. The catalog hangs off it, so deleting it here would
+    drop the ingested catalog while leaving behind the semantic rows and
+    embeddings that are identified *through* it. Tearing those down is
+    :func:`auto_ontology.dal.reset.delete_all_data`'s job.
     """
     store().query_write(
         update(s.catalog_database)

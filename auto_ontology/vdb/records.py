@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Turn embedded rows into the records :meth:`PostgresVDB.run` writes.
+"""Turn embedded rows into the records :meth:`FeatureGroupVDB.run` writes.
 
 An embedded row is the dict the row builders produce (``text``, ``path``,
 ``page_number``, ``metadata``) after the embed step has set
@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Iterable
 if TYPE_CHECKING:
     import pandas as pd
 
-    from auto_ontology.vdb.postgres import PostgresVDB
+    from auto_ontology.vdb.feature_group import FeatureGroupVDB
 
 __all__ = ["to_vdb_records", "write_embedded_rows"]
 
@@ -102,7 +102,7 @@ def to_vdb_records(
 
 
 def write_embedded_rows(
-    vdb: "PostgresVDB", rows: "Iterable[dict[str, Any]] | pd.DataFrame"
+    vdb: "FeatureGroupVDB", rows: "Iterable[dict[str, Any]] | pd.DataFrame"
 ) -> int:
     """Write the embedded *rows* to *vdb*; returns the number of rows written."""
     records = to_vdb_records(rows)

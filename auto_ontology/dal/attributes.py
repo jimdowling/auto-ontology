@@ -17,8 +17,8 @@ import logging
 from typing import Any
 
 from sqlalchemy import (
+    ColumnElement,
     and_,
-    any_,
     bindparam,
     case,
     delete,
@@ -26,13 +26,13 @@ from sqlalchemy import (
     literal,
     or_,
     select,
-    update,
 )
-from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.datasources import fetch_col_table_contexts
+from auto_ontology.dal.ops import update_returning, upsert
 from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.dal.types import utcnow
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,17 @@ logger = logging.getLogger(__name__)
 #: perfectly ordinary 4-hop path is 14, and a ceiling of 10 would have silently
 #: returned "no path" for it.
 MAX_PATH_DEPTH = 30
+
+#: The columns ``uq_column_attribute_merge_key`` covers.
+_MERGE_KEY = ["name", "source_column", "term_name", "table_id", "source"]
+
+
+def _is_pk_column(column_name: ColumnElement, pk: ColumnElement) -> ColumnElement:
+    """*column_name* is one of the names in a table's ``pk`` JSON list.
+
+    Null, which a WHERE treats as false, when the table declares no key.
+    """
+    return func.json_contains(pk, func.json_quote(column_name)) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -87,15 +98,15 @@ def merge_column_attribute(
         return None
     column_id, term_id = column[0]["id"], term[0]["id"]
 
-    statement = insert(s.column_attribute).values(
-        name=attr_name,
-        source_column=source_column,
-        term_name=term_name,
-        table_id=table_id,
-        source=SEMANTIC_SOURCE,
-        datatype=datatype,
-        description=description,
-    )
+    values = {
+        "name": attr_name,
+        "source_column": source_column,
+        "term_name": term_name,
+        "table_id": table_id,
+        "source": SEMANTIC_SOURCE,
+        "datatype": datatype,
+        "description": description,
+    }
     # One transaction: the attribute and its two links are a single fact. Without
     # this each statement autocommits, so a failure on the second leaves a
     # ColumnAttribute with no link to its column and no link to its Term --
@@ -103,31 +114,30 @@ def merge_column_attribute(
     # permanent. This runs inside the ingestion thread fan-out against a bounded
     # pool, so a pool timeout mid-way is the realistic trigger, not a crash.
     with write_transaction():
-        rows = store().query_write(
-            statement.on_conflict_do_update(
-                constraint="uq_column_attribute_merge_key",
-                set_={
-                    "datatype": statement.excluded.datatype,
-                    "description": func.coalesce(
-                        statement.excluded.description,
-                        s.column_attribute.c.description,
-                    ),
-                },
-            ).returning(s.column_attribute.c.id)
+        rows = upsert(
+            s.column_attribute,
+            values,
+            key=_MERGE_KEY,
+            set_=lambda inserted: {
+                "datatype": inserted.datatype,
+                "description": func.coalesce(
+                    inserted.description, s.column_attribute.c.description
+                ),
+            },
+            returning=[s.column_attribute.c.id],
         )
         attribute_id = rows[0]["id"]
 
-        for table, values in (
-            (
-                s.column__has_attribute,
-                {"column_id": column_id, "attribute_id": attribute_id},
-            ),
-            (
-                s.column_attribute__term,
-                {"attribute_id": attribute_id, "term_id": term_id},
-            ),
-        ):
-            store().query_write(insert(table).values(**values).on_conflict_do_nothing())
+        upsert(
+            s.column__has_attribute,
+            {"column_id": column_id, "attribute_id": attribute_id},
+            key=["column_id", "attribute_id"],
+        )
+        upsert(
+            s.column_attribute__term,
+            {"attribute_id": attribute_id, "term_id": term_id},
+            key=["attribute_id", "term_id"],
+        )
 
     return attribute_id
 
@@ -194,13 +204,13 @@ def update_column_attribute(
         "certified": func.coalesce(certified, s.column_attribute.c.certified),
     }
     if touch:
-        values["modified"] = func.now()
+        values["modified"] = utcnow()
         values["modified_by"] = modified_by
-    updated = store().query_write(
-        update(s.column_attribute)
-        .where(s.column_attribute.c.id == attr_id, owned)
-        .values(**values)
-        .returning(s.column_attribute.c.id)
+    updated = update_returning(
+        s.column_attribute,
+        and_(s.column_attribute.c.id == attr_id, owned),
+        values,
+        [s.column_attribute.c.id],
     )
     if not updated:
         return None
@@ -545,10 +555,10 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
             tgt_attr_id,
         )
         return False
-    store().query_write(
-        insert(s.column__semantic_fk)
-        .values(column_id=src_column_id, attribute_id=tgt_attr_id)
-        .on_conflict_do_nothing()
+    upsert(
+        s.column__semantic_fk,
+        {"column_id": src_column_id, "attribute_id": tgt_attr_id},
+        key=["column_id", "attribute_id"],
     )
     return True
 
@@ -641,25 +651,21 @@ def set_semantic_fk_join_default(
     source_column_ids = select(s.catalog_column.c.id).where(
         s.catalog_column.c.table_id == source_table_id
     )
-    statement = (
-        update(s.column__semantic_fk)
-        .where(
-            s.column__semantic_fk.c.attribute_id == target_attribute_id,
-            s.column__semantic_fk.c.column_id.in_(source_column_ids),
-        )
-        .values(
-            use_in_join_paths=case(
-                (
-                    s.column__semantic_fk.c.column_id == selected_column_id,
-                    True,
-                ),
-                else_=False,
-            )
-        )
-        .returning(s.column__semantic_fk.c.column_id)
-    )
     with write_transaction():
-        updated = store().query_write(statement)
+        updated = update_returning(
+            s.column__semantic_fk,
+            and_(
+                s.column__semantic_fk.c.attribute_id == target_attribute_id,
+                s.column__semantic_fk.c.column_id.in_(source_column_ids),
+            ),
+            {
+                "use_in_join_paths": case(
+                    (s.column__semantic_fk.c.column_id == selected_column_id, True),
+                    else_=False,
+                )
+            },
+            [s.column__semantic_fk.c.column_id],
+        )
         if selected_column_id not in {row["column_id"] for row in updated}:
             raise ValueError(
                 "Selected semantic FK column does not belong to the requested group"
@@ -759,7 +765,7 @@ _SEMANTIC_TABLE_EDGES = (
         _fk_column.c.id.label("fk_column_id"),
         _owner_table.c.id.label("owner_table_id"),
         _owner_column.c.id.label("owner_column_id"),
-        (_owner_column.c.name == any_(_owner_table.c.pk)).label("owner_is_pk"),
+        _is_pk_column(_owner_column.c.name, _owner_table.c.pk).label("owner_is_pk"),
     )
     .select_from(
         s.column__semantic_fk.join(
@@ -1163,7 +1169,7 @@ def find_shared_hub_bridge(col_a_id: str, col_b_id: str) -> dict:
             # The shared target must be the hub table's own declared PK, not
             # just any attribute the two columns happen to share -- see the
             # docstring above.
-            s.catalog_column.c.name == any_(s.catalog_table.c.pk),
+            _is_pk_column(s.catalog_column.c.name, s.catalog_table.c.pk),
         )
         .limit(1)
     )
@@ -1275,7 +1281,7 @@ def find_anchor_hub_siblings(
             sibling_fk.c.use_in_join_paths.is_(True),
             # The hub column must be the hub table's own declared PK -- the
             # same discipline find_shared_hub_bridge applies.
-            hub_col.c.name == any_(hub_table.c.pk),
+            _is_pk_column(hub_col.c.name, hub_table.c.pk),
             sibling_table.c.id != s.catalog_table.c.id,
         )
     )

@@ -20,6 +20,8 @@ or a dimension error from pgvector.
 
 from __future__ import annotations
 
+import json
+
 import itertools
 import logging
 import math
@@ -38,7 +40,7 @@ from auto_ontology.vdb.records import write_embedded_rows
 if TYPE_CHECKING:
     import pandas as pd
 
-    from auto_ontology.vdb.postgres import PostgresVDB
+    from auto_ontology.vdb.feature_group import FeatureGroupVDB
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +131,9 @@ def _base_url(endpoint: str) -> str:
 
 
 def _new_client(params: EmbedParams, http_client: httpx.Client | None = None) -> OpenAI:
+    # ``EMBED_HEADERS`` (a JSON object) carries the ``Authorization: ApiKey``
+    # header a Hopsworks deployment expects alongside the bearer token.
+    headers = json.loads(resolve("EMBED", "HEADERS") or "{}")
     return OpenAI(
         base_url=_base_url(params.embed_invoke_url),
         # The client refuses to start without a key; a keyless endpoint gets a
@@ -136,6 +141,7 @@ def _new_client(params: EmbedParams, http_client: httpx.Client | None = None) ->
         api_key=params.api_key or "unused",
         max_retries=_REQUEST_RETRIES,
         http_client=http_client,
+        default_headers=headers or None,
     )
 
 
@@ -150,7 +156,11 @@ def _client(params: EmbedParams) -> OpenAI:
 
 
 def _text_prefix(model_name: str, input_type: InputType) -> str:
-    if any(model in model_name for model in _TEXT_PREFIXED_MODELS):
+    # EMBED_TEXT_PREFIX=true forces the prefix for a model addressed by a name
+    # the list cannot know, such as a Hopsworks deployment's.
+    if resolve("EMBED", "TEXT_PREFIX") == "true" or any(
+        model in model_name for model in _TEXT_PREFIXED_MODELS
+    ):
         return f"{input_type}: "
     return ""
 
@@ -505,7 +515,7 @@ def embed_rows(
 def embed_rows_into_vdb(
     rows: list[dict[str, Any]],
     params: EmbedParams,
-    vdb: "PostgresVDB",
+    vdb: "FeatureGroupVDB",
     *,
     what: str,
 ) -> int:
@@ -532,7 +542,7 @@ def embed_rows_into_vdb(
 def embed_docs_into_vdb(
     docs: list[dict],
     embed_params: EmbedParams,
-    vdb: "PostgresVDB",
+    vdb: "FeatureGroupVDB",
     database_name: str | None = None,
 ) -> int:
     """Embed *docs* and upsert them into *vdb*.

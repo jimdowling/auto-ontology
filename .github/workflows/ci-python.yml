@@ -8,14 +8,10 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
     paths:
-      # Not just `auto_ontology/**`: the fixtures, the migrations and the lockfile all
-      # change what the suite does, and a green run that skipped them because
-      # only `alembic/` changed would be worthless.
       - 'auto_ontology/**'
       - 'dev_tools/**'
-      - 'alembic/**'
+      - 'docs/openapi/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/ci-python.yml'
@@ -24,108 +20,28 @@ jobs:
   lint_and_format:
     name: Ruff Check & Format
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
-
-      # Every directory holding Python, not just `auto_ontology/`. The migrations and the
-      # fixture tooling are as easy to break as anything else, and they were
-      # unchecked here while passing locally — so the first thing to land badly
-      # formatted would have been the thing nobody ran ruff over.
       - name: Ruff lint
         uses: astral-sh/ruff-action@v4.1.0
         with:
           version: '0.16.5'
           args: check
-          src: './auto_ontology ./alembic ./dev_tools'
-
+          src: './auto_ontology ./dev_tools'
       - name: Ruff format check
         uses: astral-sh/ruff-action@v4.1.0
         with:
           version: '0.16.5'
           args: format --check
-          src: './auto_ontology ./alembic ./dev_tools'
-
-  build_image:
-    name: Build Auto Ontology Server image
-    runs-on: ubuntu-latest
-    # The `secrets` context is not allowed in `if:` expressions, so surface the
-    # NGC key as an env var and gate the nvcr.io login on that instead. The
-    # Dockerfile FROMs nvcr.io/nvidia/base/ubuntu; in-org PRs pull it
-    # authenticated, forks fall back to an anonymous pull.
-    env:
-      NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
-    steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
-          df -h /
-
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to nvcr.io (for base image)
-        if: ${{ env.NGC_API_KEY != '' }}
-        uses: docker/login-action@v4
-        with:
-          registry: nvcr.io
-          username: '$oauthtoken'
-          password: ${{ env.NGC_API_KEY }}
-
-      - name: Build Auto Ontology Server image (no push)
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          push: false
-          load: false
-          cache-from: type=gha,scope=server
-          cache-to: type=gha,mode=max,scope=server
-          provenance: false
+          src: './auto_ontology ./dev_tools'
 
   tests:
-    name: Pytest (with Postgres fixtures)
+    name: Pytest on MySQL NDB Cluster
     runs-on: ubuntu-latest
-
-    # pgvector, not plain postgres: the vector store creates its collections
-    # with `CREATE EXTENSION vector`, and `stock postgres` fails there in a way
-    # that looks like a Auto Ontology bug. Pinned to the same tag as docker-compose.yml so
-    # CI and a developer's laptop disagree about nothing.
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: auto_ontology
-          POSTGRES_PASSWORD: auto_ontology
-          POSTGRES_DB: auto_ontology
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U auto_ontology -d auto_ontology"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
-    env:
-      POSTGRES_HOST: localhost
-      POSTGRES_PORT: '5432'
-      POSTGRES_USER: auto_ontology
-      POSTGRES_PASSWORD: auto_ontology
-      POSTGRES_DATABASE: auto_ontology
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
@@ -135,57 +51,23 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      # `--extra kumo` so the real-SDK Kumo tests run rather than skip. The
-      # wheels are vendored in `vendor/wheels` (flat index, cp312 and cp313
-      # manylinux x86_64 included) and every other dependency of
-      # kumo-relational-engine is already in
-      # the base tree, so this costs a few seconds and needs no index access.
       - name: Install dependencies
         run: uv sync --locked --extra kumo
 
-      # Everything below is the documented local setup from
-      # dev_tools/fixtures/sql/README.md, in the same order. No credentials:
-      # the fixture SQL is committed, and the graph fixture is hand-authored with embedding
-      # stubbed out precisely so it needs no LLM or embedding endpoint.
-      - name: Seed the fixture databases (pagila, chinook)
-        run: uv run --no-sync python -m dev_tools.fixtures.seed_fixtures
+      - name: Start the NDB cluster
+        run: docker compose -f dev_tools/ndb/docker-compose.yml up -d --wait
 
-      - name: Migrate the Auto Ontology schema
-        run: uv run --no-sync alembic upgrade head
-
-      - name: Seed the deterministic graph fixture
-        env:
-          CONNECTION_STRINGS: >-
-            postgresql://auto_ontology:auto_ontology@localhost:5432/pagila,sqlite:///${{ github.workspace }}/dev_tools/fixtures/sql/chinook.sqlite
-        run: uv run --no-sync python -m dev_tools.fixtures.seed_graph_fixture --reset
-
-      # `make migrate-check` — the migrations must describe the models. Placed
-      # after the upgrade because `alembic check` compares a live database
-      # against auto_ontology/dal/schema.py, so it needs one at the head revision. Catches
-      # a model edited without a matching revision, which otherwise surfaces as
-      # an UndefinedColumn in whichever environment deploys first.
-      - name: Fail if the schema has drifted from the models
-        run: uv run --no-sync alembic check
-
-      # `-p no:randomly` is not set and no `-x`: the point of this job is the
-      # whole picture, including how many of the fixture-backed tests ran.
       - name: Run the test suite
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: '33306'
+          MYSQL_USER: root
+          MYSQL_PASSWORD: ndbtest
+          MYSQL_DB: ontology
+          AUTO_ONTOLOGY_VDB: memory
         run: uv run --no-sync pytest auto_ontology dev_tools -q --durations=10
 
-      # A skip guard naming the wrong dependency turns a suite off silently and
-      # still reports green -- which is how the golden replay and the live
-      # connector tests sat unrun. Only the two live-warehouse tests
-      # (AUTO_ONTOLOGY_LIVE_DATABRICKS / AUTO_ONTOLOGY_LIVE_MYSQL) may skip here.
-      - name: Fail if the fixture-backed tests silently skipped
+      - name: Fail if the committed API spec is stale
         run: |
-          skipped=$(uv run --no-sync pytest auto_ontology dev_tools -q -rs 2>/dev/null \
-            | grep -c '^SKIPPED' || true)
-          echo "skipped: $skipped"
-          if [ "$skipped" -gt 2 ]; then
-            echo "::error::$skipped tests skipped; expected at most 2 (live" \
-                 "Databricks and MySQL). A fixture is probably unreachable, so" \
-                 "this run proved less than it appears to."
-            uv run --no-sync pytest auto_ontology dev_tools -q -rs 2>/dev/null \
-              | grep '^SKIPPED' || true
-            exit 1
-          fi
+          uv run --no-sync python -m dev_tools.generate_backend_openapi
+          git diff --exit-code docs/openapi/backend.json

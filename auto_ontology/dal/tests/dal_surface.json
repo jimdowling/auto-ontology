@@ -24,7 +24,7 @@
   },
   "connections": {
     "clear_connection": "(*, database_name: 'str') -> 'None'",
-    "insert_connection": "(*, connection: 'str', database_name: 'str') -> 'dict[str, Any]'",
+    "insert_connection": "(*, connection: 'str | Mapping[str, Any]', database_name: 'str') -> 'dict[str, Any]'",
     "list_connections": "() -> 'list[dict[str, Any]]'",
     "verify_connectivity": "() -> 'None'"
   },
@@ -36,7 +36,7 @@
     "custom_analysis_exists": "(database_name: 'str | None' = None) -> 'bool'",
     "delete_custom_analysis_node": "(analysis_id: 'str') -> 'None'",
     "detach_existing_sql_edges": "(analysis_id: 'str') -> 'None'",
-    "embed_custom_analyses": "(embed_params: \"'EmbedParams'\", vdb: \"'PostgresVDB'\", analysis_id: 'str | None' = None, database_name: 'str | None' = None) -> 'None'",
+    "embed_custom_analyses": "(embed_params: \"'EmbedParams'\", vdb: \"'FeatureGroupVDB'\", analysis_id: 'str | None' = None, database_name: 'str | None' = None) -> 'None'",
     "fetch_custom_analyses": "() -> 'list[dict[str, str]]'",
     "fetch_custom_analyses_with_sql": "(analysis_ids: 'list[str]') -> 'list[dict[str, str]]'",
     "fetch_database_name_for_analysis": "(analysis_id: 'str') -> 'str | None'",
@@ -95,15 +95,23 @@
   },
   "groups": {
     "GroupNameTaken": "class(ValueError)",
-    "UnknownGroupMembers": "class(ValueError)",
     "create_group": "(*, name: 'str', description: 'str | None', color: 'str', role: 'str', user_ids: 'list[str]') -> 'dict[str, Any]'",
     "delete_group": "(group_id: 'str') -> 'bool'",
-    "get_account": "(user_id: 'str') -> 'dict[str, Any] | None'",
     "get_group": "(group_id: 'str') -> 'dict[str, Any] | None'",
     "groups_for_user": "(user_id: 'str') -> 'list[dict[str, Any]]'",
     "list_groups": "() -> 'list[dict[str, Any]]'",
     "list_users_and_groups": "() -> 'dict[str, Any]'",
     "update_group": "(*, group_id: 'str', updates: 'dict[str, Any]', user_ids: 'list[str] | None') -> 'dict[str, Any] | None'"
+  },
+  "migrations": {
+    "AppTablesDDL": "class(object)",
+    "DDL": "class(Protocol)",
+    "DirectDDL": "class(object)",
+    "Step": "class(object)",
+    "applied_steps": "() -> 'set[str]'",
+    "migrate": "(ddl: 'DDL') -> 'list[str]'",
+    "steps": "() -> 'list[Step]'",
+    "table_definition": "(table: 'Table') -> 'str'"
   },
   "model_interchange": {
     "ModelImportValidationError": "class(ModelInterchangeError)",
@@ -115,6 +123,14 @@
     "make_cached_sql_column_resolver": "() -> 'Callable[[str, str | None], list[str]]'",
     "resolve_sql_column_ids": "(sql: 'str', database_name: 'str | None') -> 'list[str]'",
     "validate_database_ids": "(database_ids: 'list[str]') -> 'None'"
+  },
+  "ops": {
+    "chunks": "(items: 'Iterable[Any]', size: 'int | None' = None) -> 'Iterable[list[Any]]'",
+    "delete_returning": "(table: 'Table', where: 'ColumnElement[bool]', returning: 'Sequence[Any]') -> 'list[Row]'",
+    "insert_returning": "(table: 'Table', values: 'Mapping[str, Any] | Sequence[Mapping[str, Any]]', returning: 'Sequence[Any]') -> 'list[Row]'",
+    "mysql_errno": "(exc: 'DBAPIError') -> 'int | None'",
+    "update_returning": "(table: 'Table', where: 'ColumnElement[bool]', values: 'Mapping[str, Any]', returning: 'Sequence[Any]') -> 'list[Row]'",
+    "upsert": "(table: 'Table', values: 'Mapping[str, Any] | Sequence[Mapping[str, Any]]', *, key: 'Sequence[str]', set_: 'Callable[[Any], Mapping[str, Any]] | None' = None, returning: 'Sequence[Any] | None' = None) -> 'list[Row]'"
   },
   "owners": {
     "EditSubject": "class(object)",
@@ -134,7 +150,7 @@
     "PqlAnalysisPqlConflict": "class(Exception)",
     "count_pql_analyses": "(*, search: 'str | None' = None) -> 'int'",
     "delete_pql_analysis_node": "(analysis_id: 'str') -> 'None'",
-    "embed_pql_analyses": "(embed_params: \"'EmbedParams'\", vdb: \"'PostgresVDB'\", analysis_id: 'str | None' = None, database_name: 'str | None' = None) -> 'None'",
+    "embed_pql_analyses": "(embed_params: \"'EmbedParams'\", vdb: \"'FeatureGroupVDB'\", analysis_id: 'str | None' = None, database_name: 'str | None' = None) -> 'None'",
     "fetch_pql_analyses_by_ids": "(analysis_ids: 'list[str]') -> 'dict[str, dict[str, str]]'",
     "find_pql_analysis_by_name": "(name: 'str', exclude_id: 'str | None') -> 'dict[str, str] | None'",
     "find_pql_analysis_by_pql": "(pql: 'str', exclude_id: 'str | None') -> 'dict[str, str] | None'",
@@ -161,8 +177,6 @@
   "schema_version": {
     "SchemaOutOfDateError": "class(RuntimeError)",
     "SchemaState": "class(object)",
-    "applied_revision": "() -> 'tuple[str | None, str | None]'",
-    "head_revision": "() -> 'str | None'",
     "require_current_schema": "() -> 'None'",
     "schema_state": "() -> 'SchemaState'"
   },
@@ -181,9 +195,23 @@
     "StoreConn": "class(object)",
     "dispose_engine": "() -> 'None'",
     "get_engine": "() -> 'Engine'",
-    "sqlalchemy_url": "() -> 'str'",
     "store": "() -> 'StoreConn'",
     "write_transaction": "() -> 'Iterator[None]'"
+  },
+  "settings": {
+    "create_acronym": "(name: 'str', description: 'str' = '') -> 'dict[str, Any]'",
+    "create_prompt": "(content: 'str') -> 'dict[str, Any]'",
+    "delete_acronym": "(acronym_id: 'str') -> 'bool'",
+    "delete_prompt": "(prompt_id: 'str') -> 'bool'",
+    "find_acronym": "(name: 'str') -> 'dict[str, Any] | None'",
+    "get_configuration": "(key: 'str') -> 'str | None'",
+    "get_prompt": "(prompt_id: 'str') -> 'dict[str, Any] | None'",
+    "list_acronyms": "(*, newest_first: 'bool' = False) -> 'list[dict[str, Any]]'",
+    "list_analytics": "(since: 'Any', skip: 'int', limit: 'int | None') -> 'tuple[list[dict[str, Any]], int]'",
+    "list_prompts": "() -> 'list[dict[str, Any]]'",
+    "set_configuration": "(key: 'str', value: 'str') -> 'None'",
+    "update_acronym": "(acronym_id: 'str', **values: 'Any') -> 'dict[str, Any] | None'",
+    "update_prompt": "(prompt_id: 'str', content: 'str') -> 'dict[str, Any] | None'"
   },
   "sql_attributes": {
     "SqlAttributeExpressionConflict": "class(Exception)",
@@ -209,9 +237,9 @@
     "update_sql_attribute": "(attr_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, expression: 'str | None' = None, source: 'str | None' = None, certified: 'bool | None' = None, owner_id: 'str | None' = None, set_owner: 'bool' = False, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'None'"
   },
   "sql_fragments": {
-    "column_description_expr": "(column=Table('catalog_column', MetaData(), Column('id', Text(), table=<catalog_column>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('table_id', Text(), ForeignKey('catalog_table.id'), table=<catalog_column>, nullable=False), Column('name', Text(), table=<catalog_column>, nullable=False), Column('description', Text(), table=<catalog_column>), Column('description_certified', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('data_type', Text(), table=<catalog_column>), Column('sample_values', Text(), table=<catalog_column>), Column('format', Text(), table=<catalog_column>), Column('is_unique', Boolean(), table=<catalog_column>), Column('is_nullable', Boolean(), table=<catalog_column>), Column('ordinal_position', Integer(), table=<catalog_column>), Column('pii_processed', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_column>), schema=None)) -> 'ColumnElement'",
+    "column_description_expr": "(column=Table('catalog_column', MetaData(), Column('id', String(length=64), table=<catalog_column>, primary_key=True, nullable=False, default=CallableColumnDefault(<function new_id>)), Column('table_id', String(length=64), ForeignKey('catalog_table.id'), table=<catalog_column>, nullable=False), Column('name', String(length=191), table=<catalog_column>, nullable=False), Column('description', Bounded(length=1500), table=<catalog_column>), Column('description_certified', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('data_type', Bounded(length=512), table=<catalog_column>), Column('sample_values', BoundedJSONText(length=800), table=<catalog_column>), Column('format', String(length=64), table=<catalog_column>), Column('is_unique', Boolean(), table=<catalog_column>), Column('is_nullable', Boolean(), table=<catalog_column>), Column('ordinal_position', Integer(), table=<catalog_column>), Column('pii_processed', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', String(length=255), table=<catalog_column>), schema=None)) -> 'ColumnElement'",
     "name_contains": "(column: 'ColumnElement', search: 'str') -> 'ColumnElement'",
-    "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('owner_id', Text(), table=<catalog_table>), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('is_junction_table', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
+    "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', String(length=64), table=<catalog_table>, primary_key=True, nullable=False, default=CallableColumnDefault(<function new_id>)), Column('schema_id', String(length=64), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', String(length=191), table=<catalog_table>, nullable=False), Column('description', Bounded(length=1500), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('owner_id', String(length=64), table=<catalog_table>), Column('pk', JSONList(), table=<catalog_table>), Column('table_type', String(length=128), table=<catalog_table>), Column('is_junction_table', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', String(length=255), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
   },
   "tags": {
     "apply_labels_now_matched": "(*, rule_id: 'str', tag_ids: 'list[str]', targets: 'dict[str, Select]') -> 'int'",
@@ -227,6 +255,7 @@
     "get_or_create_tag": "(*, name: 'str', created_by: 'str | None' = None) -> 'dict[str, Any]'",
     "get_tag": "(tag_id: 'str') -> 'dict[str, Any] | None'",
     "get_tag_by_name": "(name: 'str') -> 'dict[str, Any] | None'",
+    "insert_labels": "(kind: 'str', tag_ids: 'list[str]', item_ids: 'list[str]', *, tagged_by: 'str | None' = None, rule_id: 'str | None' = None) -> 'int'",
     "is_protected_tag": "(tag: 'dict[str, Any]') -> 'bool'",
     "list_tag_targets": "(tag_id: 'str', *, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "list_tags": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
@@ -263,6 +292,15 @@
     "term_is_in_scope": "(term_id: 'str', zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None) -> 'bool'",
     "update_term": "(term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, name_certified: 'bool | None' = None, description_certified: 'bool | None' = None, owner_id: 'str | None' = None, set_owner: 'bool' = False, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'dict[str, Any] | None'",
     "upsert_table_term": "(name: 'str', description: 'str', table_id: 'str', synonyms: 'list[str] | None' = None) -> 'tuple[str, str] | None'"
+  },
+  "types": {
+    "Bounded": "class(TypeDecorator)",
+    "BoundedJSONText": "class(Bounded)",
+    "JSONList": "class(TypeDecorator)",
+    "JSONValue": "class(TypeDecorator)",
+    "UTCDateTime": "class(TypeDecorator)",
+    "new_id": "() -> 'str'",
+    "utcnow": "() -> 'datetime'"
   },
   "users": {
     "get_accessible_catalog_ids_for_zones": "(zone_ids: 'list[str]') -> 'dict[str, set[str]]'",

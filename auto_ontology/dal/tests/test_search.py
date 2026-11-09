@@ -12,8 +12,7 @@ none of which a compiled statement shows.
 Two properties get the most attention because they are the ones a reasonable
 change quietly breaks:
 
-* **Substring, not prefix.** ``ental`` has to find ``rental_count``. This is the
-  reason the indexes are ``pg_trgm`` rather than ``tsvector``, and a port to
+* **Substring, not prefix.** ``ental`` has to find ``rental_count``. A port to
   full-text search would pass every other test in this file.
 * **Name and description are matched whole.** Two tokens split across the two
   fields is not a hit, or every column named after a word in its table's
@@ -30,9 +29,12 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
+from sqlalchemy import select  # noqa: E402
+
 from auto_ontology.catalog.constants import Labels, TableTypes  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal import search  # noqa: E402
+from auto_ontology.dal.ops import insert_returning  # noqa: E402
 from auto_ontology.dal.session import store, write_transaction  # noqa: E402
 from auto_ontology.semantic.constants import (  # noqa: E402
     LABEL_COLUMN_ATTRIBUTE,
@@ -45,18 +47,16 @@ ALL_TYPES = set(search.SEARCH_OBJECT_TYPES)
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM term LIMIT 1")
+        store().query_read(select(s.term.c.id).limit(1))
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable (migrations not applied): {exc}")
 
 
 def _add(table, **values) -> str:
-    return store().query_write(table.insert().values(**values).returning(table.c.id))[
-        0
-    ]["id"]
+    return insert_returning(table, values, [table.c.id])[0]["id"]
 
 
 class World:
@@ -220,7 +220,7 @@ def _names(rows: list) -> set[str]:
 
 
 def test_matches_the_middle_of_a_word(world: World) -> None:
-    """The property `tsvector` cannot provide, and the reason for `pg_trgm`."""
+    """The property a full-text index cannot provide."""
     hits = _find(world, "otal_amou", include_description=False)
     assert f"{world.prefix}_total_amount" in _names(hits)
 
@@ -254,7 +254,7 @@ def test_description_is_searched_only_when_asked(world: World) -> None:
 
 
 def test_like_wildcards_in_the_query_are_literal(world: World) -> None:
-    """``_`` is legal in an identifier and a wildcard to Postgres.
+    """``_`` is legal in an identifier and a wildcard to ``LIKE``.
 
     Unescaped, this query would also match ``total_amount`` — the search would
     quietly answer a question the user did not ask.

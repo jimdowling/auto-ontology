@@ -93,6 +93,17 @@ def _strip_sample_values(value: Any) -> Any:
     return value
 
 
+def _author(username: Any) -> dict[str, str] | None:
+    if not username:
+        return None
+    try:
+        return member_roles.profile(username)
+    except Exception as exc:
+        # The request already succeeded; a members lookup failing only costs the name.
+        logger.warning("Could not resolve author %s: %s", username, exc)
+        return None
+
+
 def _with_authors(payload: Any) -> Any:
     data = payload.get("data") if isinstance(payload, dict) else None
     for row in data if isinstance(data, list) else [data]:
@@ -100,8 +111,7 @@ def _with_authors(payload: Any) -> Any:
             continue
         for column, author in _AUTHOR_COLUMNS.items():
             if column in row:
-                username = row[column]
-                row[author] = member_roles.profile(username) if username else None
+                row[author] = _author(row[column])
     return payload
 
 

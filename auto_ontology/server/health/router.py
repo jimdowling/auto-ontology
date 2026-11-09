@@ -42,8 +42,8 @@ def health() -> JSONResponse:
     Two independent checks, because they fail independently and only one of
     them used to be made:
 
-    * **postgres** — can this process get a usable connection out of its pool.
-    * **migrations** — is that database at the revision this build expects.
+    * **store** — can this process get a usable connection out of its pool.
+    * **migrations** — has that database every schema step this build expects.
 
     A reachable database with no tables in it passes the first and fails the
     second, and until the second existed this endpoint answered
@@ -55,12 +55,12 @@ def health() -> JSONResponse:
     nothing: restarting the process cannot fix an unreachable database, so a
     liveness probe gated on one turns a database blip into a rolling restart.
     """
-    postgres = check_store()
+    store = check_store()
     migrations = check_schema()
-    healthy = postgres["status"] == "ok" and migrations["status"] == "ok"
+    healthy = store["status"] == "ok" and migrations["status"] == "ok"
     body: dict[str, Any] = {
         "status": "ok" if healthy else "degraded",
-        "postgres": postgres,
+        "store": store,
         "migrations": migrations,
     }
     return JSONResponse(status_code=200 if healthy else 503, content=body)

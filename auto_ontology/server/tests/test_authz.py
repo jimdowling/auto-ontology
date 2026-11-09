@@ -148,3 +148,15 @@ def test_tag_authors_are_resolved_to_project_members(client: TestClient) -> None
     assert rows[0]["modified_by_user"] is None
     assert rows[1]["created_by_user"] is None
     assert rows[1]["modified_by_user"]["name"] == "Scientist"
+
+
+def test_a_failed_member_lookup_costs_only_the_author_name(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def down(username: str) -> None:
+        raise ConnectionError("Hopsworks unreachable")
+
+    monkeypatch.setattr(identity.member_roles, "profile", down)
+    response = client.get("/api/tags", headers=_signed("owner"))
+    assert response.status_code == 200
+    assert response.json()["data"][0]["created_by_user"] is None

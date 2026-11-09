@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # A one-data-node MySQL NDB Cluster for the DAL tests: NDB refuses TEXT on
 # cascade children and caps row size and transaction size, which InnoDB does not.
 # Start: docker compose -f dev_tools/ndb/docker-compose.yml up -d --wait

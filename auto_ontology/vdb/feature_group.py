@@ -65,8 +65,33 @@ class VectorIngestionError(RuntimeError):
     """Some rows of a batch did not reach the vector index."""
 
 
+#: String features searches filter on, stored as :func:`filter_key` values.
+KEYED = (*PROMOTED, "document_type")
+
+
 def text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+#: Changes whenever the stored row layout does, so rows written in an older
+#: layout read as changed and the next embed run rewrites them.
+ROW_LAYOUT = "keyed-filters"
+
+
+def row_hash(text: str) -> str:
+    """The hash recorded for a written row: its text in the current :data:`ROW_LAYOUT`."""
+    return text_hash(f"{ROW_LAYOUT}\n{text}")
+
+
+def filter_key(value: Any) -> str:
+    """The stored form of a :data:`KEYED` value.
+
+    Hopsworks maps string features of an embedding index to analyzed OpenSearch
+    ``text``, and hsfs filters them with exact ``term`` queries, so ``"Term"`` or
+    ``"Sales Order"`` never match. A lowercase hex digest is a single token that
+    the analyzer keeps as it is.
+    """
+    return text_hash(str(value))[:32]
 
 
 def _flatten(records: Iterable[Any]) -> Iterable[dict[str, Any]]:
@@ -216,8 +241,19 @@ class FeatureGroupVDB:
         fg = self._feature_group()
         written = 0
         for batch in ops.chunks(rows, batch_size):
+            keyed = [
+                {
+                    **row,
+                    **{
+                        key: filter_key(row[key])
+                        for key in KEYED
+                        if row.get(key) is not None
+                    },
+                }
+                for row in batch
+            ]
             fg.insert(
-                pd.DataFrame(batch),
+                pd.DataFrame(keyed),
                 write_options={
                     "wait_for_online_ingestion": True,
                     "online_ingestion_options": {"timeout": INGESTION_TIMEOUT_S},
@@ -233,7 +269,7 @@ class FeatureGroupVDB:
                         "id": row["id"],
                         "database_name": row["database_name"],
                         "label": row["label"],
-                        "text_hash": text_hash(row["text"]),
+                        "text_hash": row_hash(row["text"]),
                     }
                     for row in batch
                 ],
@@ -311,7 +347,7 @@ class FeatureGroupVDB:
             row
             for row in rows
             if (node_id := str((row.get("metadata") or {}).get("id") or "")) in texts
-            and stored.get(node_id) != text_hash(texts[node_id])
+            and stored.get(node_id) != row_hash(texts[node_id])
         ]
         return changed, ids
 
@@ -345,10 +381,13 @@ class FeatureGroupVDB:
         condition = None
         for key, value in (where or {}).items():
             feature = fg[key]
+            values = list(value) if isinstance(value, list | tuple | set) else [value]
+            if key in KEYED:
+                values = [filter_key(v) for v in values]
             if isinstance(value, list | tuple | set):
-                clause = feature.isin(list(value))
+                clause = feature.isin(values)
             else:
-                clause = feature == value
+                clause = feature == values[0]
             condition = clause if condition is None else condition & clause
         return condition
 

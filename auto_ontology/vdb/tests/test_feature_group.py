@@ -11,6 +11,7 @@ with the filters and the index is a loadtest's job.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -139,8 +140,19 @@ def test_hits_come_back_in_the_upstream_shape_nearest_first(
     assert hits[0]["metadata"]["label"] == "Term"
     combined = vdb.fake.last_filter  # type: ignore[attr-defined]
     assert combined.parts[0] == "and"
-    assert combined.parts[1].parts == ("in", "label", ("Term",))
-    assert combined.parts[2].parts == ("eq", "database_name", "sales")
+    assert combined.parts[1].parts == ("in", "label", (fgvdb.filter_key("Term"),))
+    assert combined.parts[2].parts == ("eq", "database_name", fgvdb.filter_key("sales"))
+
+
+def test_filtered_columns_are_stored_as_single_token_keys(vdb: FeatureGroupVDB) -> None:
+    # The index maps strings to analyzed text and hsfs filters with exact terms, so
+    # "Sales Order" could never match as written; a lowercase hex key always does.
+    vdb.run([[_record("a", "Sales Order", [1.0, 0.0])]])
+    stored = vdb.fake.rows["a"]  # type: ignore[attr-defined]
+    assert stored["label"] == fgvdb.filter_key("Term")
+    assert stored["name"] == fgvdb.filter_key("Sales Order")
+    assert stored["name"].isalnum() and stored["name"] == stored["name"].lower()
+    assert json.loads(stored["metadata"])["name"] == "Sales Order"
 
 
 def test_only_changed_rows_need_embedding(vdb: FeatureGroupVDB) -> None:
@@ -182,3 +194,18 @@ def test_vectors_are_written_as_float32(vdb: FeatureGroupVDB) -> None:
     stored = vdb.fake.rows["a"]["embedding"]  # type: ignore[attr-defined]
     assert str(stored.dtype) == "float32"
     assert stored.tolist() == [1.0, 0.0]
+
+
+def test_a_row_written_in_an_older_layout_is_rewritten(vdb: FeatureGroupVDB) -> None:
+    from auto_ontology.dal import schema as s
+    from auto_ontology.dal.session import store
+
+    vdb.run([[_record("a", "Customer", [1.0, 0.0])]])
+    # What a row written before keyed filters recorded: the hash of its bare text.
+    store().query_write(
+        s.vector_row.update()
+        .where(s.vector_row.c.id == "a")
+        .values(text_hash=fgvdb.text_hash("Customer"))
+    )
+    changed, _ = vdb.split_changed([{"text": "Customer", "metadata": {"id": "a"}}])
+    assert len(changed) == 1

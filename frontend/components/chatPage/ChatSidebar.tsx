@@ -2,12 +2,10 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { useSession } from '@/auth/auth-client';
-import { userCan } from '@/auth/permissions';
+import { Link } from 'react-router';
+import { Permission } from '@/enums/auth';
+import { useMe } from '@/hooks/useMe';
 import type { Conversation } from '@/types/chat';
 import { Button, SelectButton } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
@@ -85,7 +83,7 @@ function ConversationItem({
 								setEditing(false);
 							}
 						}}
-						className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-black outline-none focus:border-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-[#76b900]"
+						className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-black outline-none focus:border-accent dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-accent"
 					/>
 				</form>
 			</li>
@@ -116,7 +114,7 @@ function ConversationItem({
 							setEditing(true);
 						},
 					},
-					// Delete stays with admins. A viewer who can save a chat still
+					// Delete stays with admins. An editor who can save a chat still
 					// lacks conversation:delete, and the request would fail silently.
 					...(canDelete
 						? [
@@ -170,10 +168,8 @@ export const ChatSidebar = ({
 	onToggle,
 	sidebarLoading = false,
 }: ChatSidebarProps) => {
-	const { data } = useSession();
-	const canDelete = data?.user
-		? userCan({ id: data.user.id, role: data.user.role ?? null }, { conversation: ['delete'] })
-		: false;
+	const { can } = useMe();
+	const canDelete = can(Permission.ConversationDelete);
 
 	return (
 		<>
@@ -207,10 +203,10 @@ export const ChatSidebar = ({
 				}`}
 			>
 				<div className="flex h-[65px] w-full shrink-0 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
-					<Link href="/" className="flex items-center gap-3">
-						<Icon name={IconName.NvidiaLogo} className="h-6 w-auto text-[#76b900]" />
+					<Link to="/" className="flex items-center gap-3">
+						<Icon name={IconName.Logo} className="h-6 w-auto text-accent" />
 						<span className="text-sm font-semibold tracking-wide text-black dark:text-zinc-100">
-							Auto Ontology
+							Ontology
 						</span>
 					</Link>
 				</div>
@@ -224,7 +220,7 @@ export const ChatSidebar = ({
 						iconPosition="left"
 						full
 					>
-						<span className="text-lg leading-none text-[#76b900]">+</span>
+						<span className="text-lg leading-none text-accent">+</span>
 						New Chat
 					</Button>
 				</div>

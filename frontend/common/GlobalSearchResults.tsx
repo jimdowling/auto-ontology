@@ -2,10 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import type { ReactNode } from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router';
 import { CertificationBadge } from '@/common/CertificationBadge';
 import {
 	SEARCH_TYPE_ICON,
@@ -20,7 +18,7 @@ import { SearchObjectType } from '@/enums/search';
 // The Tags screen's own URL, from the module that owns it rather than spelled
 // again here — it is a leaf of plain constants, so importing it pulls in no
 // page.
-import { tagPath } from '@/app/settings/tags/tags-path';
+import { tagPath } from '@/pages/settings/tags/tags-path';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { searchTokens, synonymWordTokens } from '@/lib/searchTokens';
 import type { GlobalSearchItem } from '@/types/search';
@@ -114,10 +112,7 @@ const HighlightedText = ({ text, query }: { text: string; query: string }) => {
 		<>
 			{parts.map((part, index) =>
 				needle.has(part.toLowerCase()) ? (
-					<mark
-						key={`${part}-${index}`}
-						className="rounded-sm bg-[#76b900]/25 text-inherit"
-					>
+					<mark key={`${part}-${index}`} className="rounded-sm bg-accent/25 text-inherit">
 						{part}
 					</mark>
 				) : (
@@ -144,7 +139,7 @@ const HighlightedWholeWords = ({ text, query }: { text: string; query: string })
 			nodes.push(text.slice(cursor, wordStart));
 		}
 		nodes.push(
-			<mark key={`${word}-${wordStart}`} className="rounded-sm bg-[#76b900]/25 text-inherit">
+			<mark key={`${word}-${wordStart}`} className="rounded-sm bg-accent/25 text-inherit">
 				{word}
 			</mark>,
 		);
@@ -228,9 +223,9 @@ export const GlobalSearchResults = ({
 			return (
 				<li key={`${item.type}:${item.id}`}>
 					<Link
-						href={href}
+						to={href}
 						onClick={onNavigate}
-						className="flex min-w-0 cursor-pointer flex-col gap-1.5 overflow-hidden rounded-xl border border-zinc-200 bg-white px-3 py-2.5 select-none [&_*]:cursor-pointer transition-colors hover:border-[#76b900]/50 hover:bg-[#76b900]/5 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-[#76b900]/40 dark:hover:bg-[#76b900]/10"
+						className="flex min-w-0 cursor-pointer flex-col gap-1.5 overflow-hidden rounded-xl border border-zinc-200 bg-white px-3 py-2.5 select-none [&_*]:cursor-pointer transition-colors hover:border-accent/50 hover:bg-accent/5 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-accent/40 dark:hover:bg-accent/10"
 					>
 						<div className="flex min-w-0 items-center gap-2 overflow-hidden">
 							<Icon name={typeIcon} className="h-4 w-4 shrink-0 text-secondary" />

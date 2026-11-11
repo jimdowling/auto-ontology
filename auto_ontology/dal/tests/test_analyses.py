@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""CustomAnalysis, PqlAnalysis, and UI-managed connections.
+"""CustomAnalysis, PqlAnalysis, and the ontology's sources.
 
 The zone rule on ``list_custom_analyses`` is the sharpest thing here. It is
 all-or-nothing for a more concrete reason than the Term or SqlAttribute rules:
@@ -26,23 +26,22 @@ from auto_ontology.dal import connections as conn  # noqa: E402
 from auto_ontology.dal import custom_analyses as ca  # noqa: E402
 from auto_ontology.dal import pql_analyses as pa  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.ops import insert_returning  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM custom_analysis LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.custom_analysis.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable: {exc}")
 
 
 def _add(table, **values) -> str:
-    return store().query_write(table.insert().values(**values).returning(table.c.id))[
-        0
-    ]["id"]
+    return insert_returning(table, values, [table.c.id])[0]["id"]
 
 
 def _link(table, **values) -> None:
@@ -390,19 +389,24 @@ def test_a_blank_pql_description_is_omitted(pql) -> None:
 
 
 # --------------------------------------------------------------------------
-# Connections
+# Sources
 # --------------------------------------------------------------------------
 
 
 def test_insert_connection_creates_the_database_if_absent(world) -> None:
-    """A connection is normally configured *before* anything is ingested."""
+    """A source is normally configured *before* anything is ingested."""
     name = f"{world.prefix}-fresh"
     try:
         result = conn.insert_connection(
-            connection='{"host": "db.example", "port": 5432}', database_name=name
+            connection='{"data_source": "sales", "schemas": ["public"]}',
+            database_name=name,
         )
         assert result["name"] == name
-        assert result["connection"] == {"host": "db.example", "port": 5432}
+        assert result["connection"] == {
+            "data_source": "sales",
+            "schemas": ["public"],
+            "table_regex": None,
+        }
     finally:
         store().query_write(
             s.catalog_database.delete().where(s.catalog_database.c.name == name)
@@ -410,38 +414,43 @@ def test_insert_connection_creates_the_database_if_absent(world) -> None:
 
 
 def test_insert_connection_updates_an_existing_database(world) -> None:
-    conn.insert_connection(connection='{"host": "first"}', database_name=world.prefix)
-    conn.insert_connection(connection='{"host": "second"}', database_name=world.prefix)
+    conn.insert_connection(
+        connection={"data_source": "first"}, database_name=world.prefix
+    )
+    conn.insert_connection(
+        connection={"data_source": "second"}, database_name=world.prefix
+    )
     row = store().query_read(
         select(s.catalog_database.c.connection).where(
             s.catalog_database.c.id == world.database
         )
     )[0]
-    assert row["connection"] == {"host": "second"}
+    assert row["connection"]["data_source"] == "second"
 
 
-def test_databases_without_a_connection_are_skipped(world, monkeypatch) -> None:
-    """This is "connections", not "databases" — an ingested catalog with no UI
-    connection has nothing to return."""
-    monkeypatch.setattr(conn, "read_secret", lambda name: None)
+def test_a_source_refuses_credentials(world) -> None:
+    """Credentials come from the Hopsworks data source and never reach the row."""
+    with pytest.raises(ValueError, match="credentials"):
+        conn.insert_connection(
+            connection={"data_source": "sales", "password": "secret"},
+            database_name=world.prefix,
+        )
+
+
+def test_databases_without_a_source_are_skipped(world) -> None:
+    """These are sources, not databases: an imported catalog with none is not one."""
     before = conn.list_connections()
 
-    conn.insert_connection(connection='{"host": "db"}', database_name=world.prefix)
+    conn.insert_connection(connection={"data_source": "db"}, database_name=world.prefix)
     after = conn.list_connections()
 
-    assert {"host": "db"} in after
+    assert {
+        "data_source": "db",
+        "schemas": [],
+        "table_regex": None,
+        "database_name": world.prefix,
+    } in after
     assert len(after) == len(before) + 1
-
-
-def test_a_vault_secret_wins_over_the_stored_connection(world, monkeypatch) -> None:
-    conn.insert_connection(connection='{"host": "stored"}', database_name=world.prefix)
-    monkeypatch.setattr(
-        conn,
-        "read_secret",
-        lambda name: {"host": "vault"} if name == world.prefix else None,
-    )
-    assert {"host": "vault"} in conn.list_connections()
-    assert {"host": "stored"} not in conn.list_connections()
 
 
 def test_verify_connectivity_succeeds_against_a_live_store() -> None:

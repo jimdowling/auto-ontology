@@ -2,9 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { userCan, type PermissionRequest } from '@/auth/permissions';
-import type { ResolvedUser } from '@/auth/resolve-user';
-import { Role } from '@/enums/auth';
 import { ComposerSectionKind } from '@/enums/datasources';
 import type { ComposerOwnerSection } from '@/types/composer-section';
 import type { Owner } from '@/types/owners';
@@ -47,17 +44,6 @@ export const ownerChoices = (
 	return eligible;
 };
 
-/** The signed-in account, when that account is allowed to own this kind of object. */
-export const defaultOwnerId = (
-	owners: Owner[],
-	permission: string,
-	userId: string | null | undefined,
-): string =>
-	userId != null &&
-	filterOwnersByPermission(owners, permission).some((owner) => owner.id === userId)
-		? userId
-		: '';
-
 /**
  * The owner a save should write.
  *
@@ -72,42 +58,6 @@ export const changedOwnerId = (
 	const next = edit.trim();
 	if (next === (current ?? '')) return undefined;
 	return next === '' ? null : next;
-};
-
-const ownerGrants = (owner: Owner, permission: PermissionRequest): boolean => {
-	const requested = Object.entries(permission as Record<string, readonly string[]>).flatMap(
-		([resource, actions]) => actions.map((action) => `${resource}:${action}`),
-	);
-	return requested.every((item) => owner.permissions.includes(item));
-};
-
-/**
- * Whether this account may edit through its own role or the entity's owner
- * group. Group permissions apply only when that exact group owns the entity.
- * Until the account is known this answers yes, so Edit does not flash off
- * before the session arrives. The write is checked again on the server.
- */
-export const canEditEntity = ({
-	user,
-	permission,
-	ownerId,
-	owners = [],
-}: {
-	user: ResolvedUser | null;
-	permission: PermissionRequest;
-	ownerId?: string | null;
-	owners?: Owner[];
-}): boolean => {
-	if (user == null) return true;
-	if (user.role === Role.Admin) return true;
-	if (userCan(user, permission)) return true;
-
-	const owner = findOwner(owners, ownerId);
-	return (
-		owner?.kind === 'group' &&
-		owner.member_ids.includes(user.id) &&
-		ownerGrants(owner, permission)
-	);
 };
 
 /** The owner card a detail page puts next to the object's other fields. */

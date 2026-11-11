@@ -80,7 +80,7 @@ def _run_loop(
         "auto_ontology.retrieval.text_to_sql.main.stream_agent_response", fake_stream
     )
 
-    in_q = _FakeQueue([(worker_module._MSG_ASK, ("q", None, None, None, [], evidence))])
+    in_q = _FakeQueue([(worker_module._MSG_ASK, ("q", None, None, [], evidence))])
     worker_module._worker_loop(in_q, _FakeQueue())
     return captured
 

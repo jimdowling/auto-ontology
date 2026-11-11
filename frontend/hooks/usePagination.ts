@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useMemo, useState } from 'react';
 
 import type { TablePagination } from '@/types/table';

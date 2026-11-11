@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { EmptyState } from '@/common/EmptyState';
 import { Icon, IconName } from '@/common/icons';
 import { EmptyStateVariant } from '@/enums/emptyState';
@@ -14,8 +12,8 @@ export const SemanticNotReady = () => (
 	<EmptyState
 		variant={EmptyStateVariant.Welcome}
 		illustration={
-			<div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#76b900]/15">
-				<Icon name={IconName.NvidiaLogo} className="h-6 w-6 text-[#76b900]" />
+			<div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/15">
+				<Icon name={IconName.Logo} className="h-6 w-6 text-accent" />
 			</div>
 		}
 		title="Semantic Layer Not Ready"

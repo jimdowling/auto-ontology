@@ -38,14 +38,15 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.catalog.constants import Edges, Labels
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.attributes import fetch_column_attribute_columns_map
 from auto_ontology.dal.datasources import fetch_col_table_contexts
+from auto_ontology.dal.ops import chunks, upsert
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.tags import TARGET_COLUMN_ATTRIBUTE, TARGET_TERM, fetch_tags_map
+from auto_ontology.dal.types import new_id, utcnow
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.dal.zones import fetch_table_zones_map, zone_covers_table
 from auto_ontology.semantic.constants import (
@@ -352,15 +353,12 @@ def update_term(
     # own, `fetch_column_attributes_by_term_id` matches through the stale copy
     # and the Term's attribute list reads as empty from then on.
     with write_transaction():
-        # Read the old name first. RETURNING gives the *new* one, and the caller
-        # compares the two to decide whether a rename happened -- with it always
-        # None, `name_changed` was true for every edit, so a description-only
-        # PATCH cleared description_suggestion on every SqlAttribute of the term
-        # and re-embedded all of them.
         previous = store().query_read(
-            select(s.term.c.name).where(s.term.c.id == term_id)
+            select(s.term.c.name).where(s.term.c.id == term_id).with_for_update()
         )
-        old_name = previous[0]["name"] if previous else None
+        if not previous:
+            return None
+        old_name = previous[0]["name"]
 
         values: dict[str, Any] = {
             "name": func.coalesce(literal(name, String), s.term.c.name),
@@ -376,30 +374,24 @@ def update_term(
         # Only an edit from the app. Compilation calls this without ``touch``
         # and must not look like someone saved the term.
         if touch:
-            values["modified"] = func.now()
+            values["modified"] = utcnow()
             values["modified_by"] = modified_by
-        rows = store().query_write(
-            update(s.term)
-            .where(s.term.c.id == term_id)
-            .values(**values)
-            .returning(
+        store().query_write(
+            update(s.term).where(s.term.c.id == term_id).values(**values)
+        )
+        rows = store().query_read(
+            select(
                 s.term.c.id,
                 s.term.c.name,
                 s.term.c.description,
                 s.term.c.name_certified,
                 s.term.c.description_certified,
                 s.term.c.owner_id,
-            )
+            ).where(s.term.c.id == term_id)
         )
-        if not rows:
-            return None
         result = dict(rows[0])
         result["old_name"] = old_name
 
-        # Read before the UPDATE would have been simpler, but RETURNING gives
-        # the new name and the old one is only knowable beforehand -- so it is
-        # fetched first, above, by way of this second statement being the
-        # *rename*.
         store().query_write(
             update(s.column_attribute)
             .where(
@@ -491,25 +483,25 @@ def upsert_table_term(
             if existing:
                 continue
 
-            statement = (
-                insert(s.term)
-                .values(
-                    name=candidate_name,
-                    source=SEMANTIC_SOURCE,
-                    description=description,
-                    synonyms=synonyms or [],
-                )
-                .on_conflict_do_nothing(constraint="uq_term_name_source")
-                .returning(s.term.c.id)
+            term_id = new_id()
+            winner = upsert(
+                s.term,
+                {
+                    "id": term_id,
+                    "name": candidate_name,
+                    "source": SEMANTIC_SOURCE,
+                    "description": description,
+                    "synonyms": synonyms or [],
+                },
+                key=["name", "source"],
+                returning=[s.term.c.id],
             )
-            inserted = store().query_write(statement)
-            if not inserted:
+            if winner[0]["id"] != term_id:
                 # Another compiler won this name after the read. Try the next,
                 # more specific candidate instead of sharing its Term.
                 continue
-            term_id = inserted[0]["id"]
             store().query_write(
-                insert(s.table__term).values(table_id=table_id, term_id=term_id)
+                s.table__term.insert().values(table_id=table_id, term_id=term_id)
             )
             return term_id, candidate_name
 
@@ -535,9 +527,7 @@ def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
             .where(
                 s.column_attribute__term.c.attribute_id.in_(list(attr_ids)),
                 s.term.c.synonyms.isnot(None),
-                func.array_length(s.term.c.synonyms, 1) > 0,
             )
-            .distinct()
         )
     except Exception:
         logger.warning("fetch_term_synonyms: query failed", exc_info=True)
@@ -581,27 +571,12 @@ def fetch_all_terms(
     another. Pair with ``count_terms`` for the total.
     """
     table_ids = _scope_table_ids(zone_ids, data_ids_by_zone)
-    schema_names = (
-        select(func.array_agg(func.distinct(s.catalog_schema.c.name)))
-        .select_from(
-            s.table__term.join(
-                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
-            ).join(
-                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
-            )
-        )
-        .where(s.table__term.c.term_id == s.term.c.id)
-        .correlate(s.term)
-        .scalar_subquery()
-    )
-
     statement = (
         select(
             s.term.c.name,
             s.term.c.description,
             s.term.c.synonyms,
             s.term.c.id,
-            schema_names.label("schema_names"),
             s.term.c.name_certified,
             s.term.c.description_certified,
             s.term.c.owner_id,
@@ -615,16 +590,39 @@ def fetch_all_terms(
         statement = statement.limit(limit)
 
     terms = [dict(r) for r in store().query_read(statement)]
-    # Scoped to the rows just read, so paging does not resolve zones and tags
-    # for the rest of the glossary on every page.
+    # Scoped to the rows just read, so paging does not resolve schemas, zones
+    # and tags for the rest of the glossary on every page.
     term_ids = [row["id"] for row in terms]
+    schemas_by_term = _schema_names_by_term(term_ids)
     zones_by_term = fetch_term_zones_map(zone_ids, term_ids=term_ids)
     tags_by_term = fetch_tags_map(TARGET_TERM, term_ids)
     for row in terms:
-        row["schema_names"] = row["schema_names"] or []
+        row["schema_names"] = schemas_by_term.get(row["id"], [])
         row["zones"] = zones_by_term.get(row["id"], [])
         row["tags"] = tags_by_term.get(row["id"], [])
     return terms
+
+
+def _schema_names_by_term(term_ids: list[str]) -> dict[str, list[str]]:
+    """``{term_id: [schema name, ...]}``, sorted and distinct, over the tables
+    representing each term. Terms with no table are absent."""
+    found: dict[str, set[str]] = {}
+    for batch in chunks(term_ids):
+        rows = store().query_read(
+            select(s.table__term.c.term_id, s.catalog_schema.c.name)
+            .select_from(
+                s.table__term.join(
+                    s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
+                ).join(
+                    s.catalog_schema,
+                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                )
+            )
+            .where(s.table__term.c.term_id.in_(batch))
+        )
+        for row in rows:
+            found.setdefault(row["term_id"], set()).add(row["name"])
+    return {term_id: sorted(names) for term_id, names in found.items()}
 
 
 def count_terms(
@@ -946,7 +944,6 @@ def fetch_terms_with_sqls(
             .join(s.sql_query, s.sql_query.c.id == s.sql_query__table.c.sql_query_id)
         )
         .where(s.term.c.source == source, ~owned)
-        .distinct()
         .order_by(s.term.c.id, s.sql_query.c.id)
     )
     if database_name is not None:
@@ -963,8 +960,15 @@ def fetch_terms_with_sqls(
 
     rows = store().query_read(statement)
 
+    # A statement over two tables a term represents comes back once per table.
+    # Deduplicated here rather than by DISTINCT, which would have the server
+    # compare whole statement texts.
     grouped: dict[str, dict[str, Any]] = {}
+    seen: set[tuple[str, str]] = set()
     for row in rows:
+        if (row["term_id"], row["id"]) in seen:
+            continue
+        seen.add((row["term_id"], row["id"]))
         entry = grouped.setdefault(
             row["term_id"],
             {
@@ -1028,15 +1032,13 @@ def fetch_terms_and_attributes_for_table(
     table_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """``(terms, attrs)`` written for one table — the inline embedding input."""
-    terms = store().query_read(
+    rows = store().query_read(
         select(
             s.term.c.name,
             s.term.c.description,
             s.term.c.synonyms,
             s.term.c.id,
-            func.array_agg(func.distinct(s.catalog_schema.c.name)).label(
-                "schema_names"
-            ),
+            s.catalog_schema.c.name.label("schema_name"),
         )
         .select_from(
             s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id)
@@ -1049,10 +1051,19 @@ def fetch_terms_and_attributes_for_table(
             s.table__term.c.table_id == table_id,
             s.term.c.source == SEMANTIC_SOURCE,
         )
-        .group_by(s.term.c.id)
     )
+    terms = [
+        {
+            "name": row["name"],
+            "description": row["description"],
+            "synonyms": row["synonyms"],
+            "id": row["id"],
+            "schema_names": [row["schema_name"]],
+        }
+        for row in rows
+    ]
     attrs = store().query_read(_embedding_attrs_for_table(table_id))
-    return [dict(r) for r in terms], [dict(r) for r in attrs]
+    return terms, [dict(r) for r in attrs]
 
 
 def fetch_term_and_column_attributes_for_embedding(
@@ -1651,18 +1662,14 @@ _LINK_PATH_LABELS = {
 def _term_link_edges():
     """Every edge a term↔term path may walk, **undirected**, tagged with its type.
 
-    Unlike :data:`~auto_ontology.dal.schema.JOIN_PATH_EDGE_VIEW_SQL`, SEMANTIC_FK is
-    emitted in *both* directions here. A term↔term edge already means the two
-    terms genuinely share a table under :func:`fetch_term_table_pairs`'s rules,
-    so tracing some real path between them cannot fabricate a link the way
-    ``find_join_path``'s column-to-column search could -- it can only surface a
-    chain that already exists. It has to be undirected for the join-table shape:
-    when both terms reach their shared table only through SEMANTIC_FK, the path
-    must step *against* one of the two stored (column -> attribute) directions
-    whichever end it starts from.
-
-    Not a database view, deliberately: one function reads it, and a view would
-    have to be kept in step through a migration for no gain.
+    SEMANTIC_FK is emitted in *both* directions here. A term↔term edge already
+    means the two terms genuinely share a table under
+    :func:`fetch_term_table_pairs`'s rules, so tracing some real path between
+    them cannot fabricate a link the way ``find_join_path``'s column-to-column
+    search could -- it can only surface a chain that already exists. It has to
+    be undirected for the join-table shape: when both terms reach their shared
+    table only through SEMANTIC_FK, the path must step *against* one of the two
+    stored (column -> attribute) directions whichever end it starts from.
     """
 
     def leg(src_kind, src_id, dst_kind, dst_id, rel_type, source):

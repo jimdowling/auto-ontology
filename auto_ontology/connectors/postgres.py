@@ -30,6 +30,10 @@ def _fetch_frame(
     return pd.DataFrame(rows)
 
 
+def _read_only(connection: psycopg.Connection) -> None:
+    connection.execute("SET SESSION default_transaction_read_only = on")
+
+
 class PostgresDatabase(SQLDatabase):
     """Concrete :class:`SQLDatabase` backed by ``psycopg`` (v3).
 
@@ -55,6 +59,9 @@ class PostgresDatabase(SQLDatabase):
         self._pool: ConnectionPool = ConnectionPool(
             connection_string,
             kwargs={"autocommit": True},
+            # A SET rather than a startup ``options`` parameter, which
+            # connection poolers such as PgBouncer refuse.
+            configure=_read_only,
             min_size=1,
             max_size=4,
             max_idle=300.0,

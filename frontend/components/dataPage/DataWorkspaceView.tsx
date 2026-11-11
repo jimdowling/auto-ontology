@@ -2,11 +2,9 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useSearchParams } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { BackPanelLayout } from '@/common/BackPanelLayout';
 import type { NodePatch } from '@/api/types';
 import type { BreadcrumbItem } from '@/common/Breadcrumbs';
@@ -27,9 +25,9 @@ import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded'
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { buildTreeFocusPageFormat, resolveTreeNode } from '@/lib/data/tree-focus-page';
 import { TAGS_SECTION_ID, fetchTagOptions, stagedTagIds, syncTags } from '@/lib/tags';
-import { canEditEntity } from '@/lib/owners';
-import { fetchOwnerDirectory, ownerQueries } from '@/lib/queries/owners';
-import { useSession } from '@/auth/auth-client';
+import { fetchOwnerDirectory } from '@/lib/queries/owners';
+import { Permission } from '@/enums/auth';
+import { useMe } from '@/hooks/useMe';
 import {
 	mergeColumnsIntoTable,
 	mergeSchemasIntoDatabase,
@@ -103,10 +101,9 @@ export function DataWorkspaceView() {
 	// page that offers them, so walking the tree doesn't re-read the
 	// vocabulary at each table and column.
 	const queryClient = useQueryClient();
-	const { data: session } = useSession();
-	const { data: owners = [] } = useQuery(ownerQueries.all());
-	const router = useRouter();
-	const searchParams = useSearchParams();
+	const { can } = useMe();
+	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 	const rawFocus = searchParams.get('focus');
 	const treeFocusId = rawFocus != null && rawFocus.trim() !== '' ? rawFocus.trim() : null;
 
@@ -275,9 +272,9 @@ export function DataWorkspaceView() {
 						);
 			if (parentSegments.length !== parentDepth) return;
 
-			router.push(catalogPathFromFocusId([...parentSegments, rowId].join('|')));
+			navigate(catalogPathFromFocusId([...parentSegments, rowId].join('|')));
 		},
-		[router, treeFocusId],
+		[navigate, treeFocusId],
 	);
 
 	// Breadcrumbs live in the top bar, so the workspace names the catalog node
@@ -388,22 +385,7 @@ export function DataWorkspaceView() {
 		[applyNodePatch],
 	);
 
-	const catalogActor = session?.user
-		? { id: session.user.id, role: session.user.role ?? null }
-		: null;
-	const focusedCatalogOwnerId = useMemo(() => {
-		const resolved = resolveTreeNode(treeFocusId, treeDatabases);
-		if (resolved.type === DataModels.DB) return resolved.database.owner_id;
-		if (resolved.type === DataModels.SCHEMA) return resolved.schema.owner_id;
-		if (resolved.type === DataModels.TABLE) return resolved.table.owner_id;
-		return undefined;
-	}, [treeFocusId, treeDatabases]);
-	const canEditFocusedCatalog = canEditEntity({
-		user: catalogActor,
-		permission: { catalog: ['edit'] },
-		ownerId: focusedCatalogOwnerId,
-		owners,
-	});
+	const canEditFocusedCatalog = can(Permission.CatalogEdit);
 
 	if (loadError) {
 		return (
@@ -476,14 +458,7 @@ export function DataWorkspaceView() {
 					onDataTableRowClick={handleDataTableRowClick}
 					onCertificationChange={handleCertificationChange}
 					onDataTableCertificationChange={handleChildCertificationChange}
-					canCertifyDataTableRow={(_sectionId, _rowId, ownerId) =>
-						canEditEntity({
-							user: catalogActor,
-							permission: { catalog: ['edit'] },
-							ownerId,
-							owners,
-						})
-					}
+					canCertifyDataTableRow={() => canEditFocusedCatalog}
 					hideEditToolbar={!canEditFocusedCatalog}
 				/>
 			</main>

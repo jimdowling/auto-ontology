@@ -184,8 +184,8 @@ class StatusResponse(_Payload):
 class HealthResponse(_Payload):
     """Readiness body — 200 when healthy, 503 when degraded.
 
-    ``postgres`` reports whether the database answers; ``migrations`` whether it
-    holds the revision this build expects. Both matter and they fail
+    ``store`` reports whether the database answers; ``migrations`` whether it
+    holds every schema step this build expects. Both matter and they fail
     independently: a reachable database carrying no tables at all satisfies the
     first and not the second, and reporting only the first is how a health
     check comes to say ``ok`` about a server that 500s on every catalog call.
@@ -196,7 +196,7 @@ class HealthResponse(_Payload):
     """
 
     status: str
-    postgres: dict[str, str]
+    store: dict[str, str]
     migrations: dict[str, str]
 
 

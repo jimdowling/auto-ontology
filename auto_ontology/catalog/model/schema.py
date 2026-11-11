@@ -130,9 +130,9 @@ class Schema:
                 ),
                 # `pd.isna`, not a truthiness test: after normalize_columns
                 # these are pandas' nullable dtypes, so a missing value is
-                # pd.NA, which psycopg cannot adapt -- it aborts the whole
-                # schema write rather than storing NULL. A connector is allowed
-                # to omit is_nullable; see SQLDatabase.get_columns.
+                # pd.NA, which the MySQL driver binds as the string '<NA>'
+                # rather than NULL. A connector is allowed to omit
+                # is_nullable; see SQLDatabase.get_columns.
                 "is_nullable": (
                     None if pd.isna(x["is_nullable"]) else bool(x["is_nullable"])
                 ),

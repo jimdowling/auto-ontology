@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const TICK_MS = 100;

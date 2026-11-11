@@ -24,23 +24,24 @@ from sqlalchemy import select  # noqa: E402
 from auto_ontology.dal import attributes as a  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.types import new_id  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM catalog_table LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.catalog_table.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable: {exc}")
 
 
 def _add(table, **values) -> str:
-    return store().query_write(table.insert().values(**values).returning(table.c.id))[
-        0
-    ]["id"]
+    values.setdefault("id", new_id())
+    store().query_write(table.insert().values(**values))
+    return values["id"]
 
 
 def _link(table, **values) -> None:

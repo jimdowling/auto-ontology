@@ -98,20 +98,6 @@ export type ComposerLoadingPanelSection = {
 	message: string;
 };
 
-export type ComposerZoneChip = {
-	id: string;
-	name: string;
-	color: string | null;
-	enabled: boolean;
-};
-
-export type ComposerZonesSection = {
-	type: ComposerSectionKind.ZONES_CHIPS;
-	id: string;
-	title: string;
-	zones: ComposerZoneChip[];
-};
-
 export type ComposerRelatedTermChip = {
 	id: string;
 	name: string;
@@ -207,7 +193,6 @@ export type ComposerSection =
 	| ComposerInfoGridSection
 	| ComposerDataTableSection
 	| ComposerLoadingPanelSection
-	| ComposerZonesSection
 	| ComposerRelatedTermsSection
 	| ComposerEntitiesSection
 	| ComposerEntityTagsSection
@@ -220,7 +205,6 @@ const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.INFO_GRID,
 	ComposerSectionKind.DATA_TABLE,
 	ComposerSectionKind.LOADING_PANEL,
-	ComposerSectionKind.ZONES_CHIPS,
 	ComposerSectionKind.RELATED_TERMS_CHIPS,
 	ComposerSectionKind.ENTITY_CHIPS,
 	ComposerSectionKind.ENTITY_TAGS,

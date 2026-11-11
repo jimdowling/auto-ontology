@@ -1,0 +1,25 @@
+<!doctype html>
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+<html lang="en" class="h-full antialiased">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Ontology</title>
+		<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+		<script>
+			// Assets and api/ calls are relative to the page, so the app proxy's
+			// mount path has to end in a slash for them to resolve under it.
+			if (!/(\/|\.html)$/.test(location.pathname)) {
+				location.replace(location.pathname + '/' + location.search + location.hash);
+			}
+		</script>
+	</head>
+	<body class="flex h-full flex-col bg-white text-heading dark:bg-zinc-950 dark:text-zinc-100">
+		<div id="root" class="flex h-full flex-col"></div>
+		<script type="module" src="./main.tsx"></script>
+	</body>
+</html>

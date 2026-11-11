@@ -27,6 +27,7 @@ from typing import Any
 from sqlalchemy import distinct, func, or_, select
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import delete_returning, insert_returning, update_returning
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.server.zones.utils import format_zone
 
@@ -39,8 +40,8 @@ _API_LABEL = {"database": "database", "schema": "schema", "table": "table"}
 def _classify_items(item_ids: list[str]) -> dict[str, list[str]]:
     """Sort a flat list of ids into the tier each belongs to.
 
-    Ids that match nothing are dropped: linking a zone to something that no longer exists is a no-op, not an
-    error.
+    Ids that match nothing are dropped: linking a zone to something that no
+    longer exists is a no-op, not an error.
     """
     if not item_ids:
         return {"database": [], "schema": [], "table": []}
@@ -281,16 +282,16 @@ def create_zone(
         raise ValueError(f"Zone with name {name!r} already exists")
 
     with write_transaction():
-        rows = store().query_write(
-            s.zone.insert()
-            .values(name=name, description=description, color=color)
-            .returning(
+        rows = insert_returning(
+            s.zone,
+            {"name": name, "description": description, "color": color},
+            [
                 s.zone.c.id,
                 s.zone.c.name,
                 s.zone.c.description,
                 s.zone.c.color,
                 s.zone.c.enabled,
-            )
+            ],
         )
         zone = format_zone(_zone_row(rows[0]), items=[], enabled=True)
 
@@ -353,10 +354,7 @@ def update_zone(
 
 def delete_zone(zone_id: str) -> bool:
     """Delete a zone. Its memberships go by cascade."""
-    rows = store().query_write(
-        s.zone.delete().where(s.zone.c.id == zone_id).returning(s.zone.c.id)
-    )
-    return bool(rows)
+    return bool(delete_returning(s.zone, s.zone.c.id == zone_id, [s.zone.c.id]))
 
 
 def set_zone_enabled(zone_id: str, enabled: bool) -> dict[str, Any] | None:
@@ -365,11 +363,8 @@ def set_zone_enabled(zone_id: str, enabled: bool) -> dict[str, Any] | None:
     Here it is a boolean column, which is the same fact without the relabelling
     that every read site had to spell as ``:Zone|disableZone``.
     """
-    rows = store().query_write(
-        s.zone.update()
-        .where(s.zone.c.id == zone_id)
-        .values(enabled=enabled)
-        .returning(s.zone.c.id)
+    rows = update_returning(
+        s.zone, s.zone.c.id == zone_id, {"enabled": enabled}, [s.zone.c.id]
     )
     if not rows:
         return None

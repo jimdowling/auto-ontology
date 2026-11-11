@@ -4,12 +4,11 @@
 
 type SpinnerProps = {
 	className?: string;
+	/** Announces the spinner as a status; without it the spinner is decorative. */
+	'aria-label'?: string;
 };
 
-// Small inline loading indicator — a rotating ring. Shared by Toast's
-// "pending" variant and any other spot that needs a lightweight, in-line
-// "this is running" cue without pulling in a bigger loader.
-export const Spinner = ({ className = 'h-5 w-5' }: SpinnerProps) => (
+export const Spinner = ({ className = 'h-5 w-5', 'aria-label': ariaLabel }: SpinnerProps) => (
 	<svg
 		viewBox="0 0 24 24"
 		fill="none"
@@ -17,7 +16,9 @@ export const Spinner = ({ className = 'h-5 w-5' }: SpinnerProps) => (
 		strokeWidth={2}
 		strokeLinecap="round"
 		strokeLinejoin="round"
-		aria-hidden
+		role={ariaLabel ? 'status' : undefined}
+		aria-label={ariaLabel}
+		aria-hidden={ariaLabel ? undefined : true}
 		className={`animate-spin ${className}`}
 	>
 		<circle cx="12" cy="12" r="10" opacity="0.25" />

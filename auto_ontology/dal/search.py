@@ -8,9 +8,10 @@ One query term, ten tables, one ranked list. Three decisions shape the rest:
 
 * **It is a substring match, and only that.** ``contains`` is the sole
   ``text_match_option`` the API offers, so typing ``mount`` must find
-  ``total_amount``. That is why the indexes behind this are ``pg_trgm`` GIN
-  rather than ``tsvector``: full-text search reaches the front of a token and no
-  further, so it would silently stop finding the word it sits inside of.
+  ``total_amount``. Each table is matched with ``LIKE '%token%'``, which no
+  index serves, so a search scans the rows of the ten tables. Full-text search
+  would be indexable, but it reaches the front of a token and no further, so it
+  would silently stop finding the word it sits inside of.
 * **Each field is matched separately, not together.** A hit needs *every*
   token in its name, or *every* token in its description; never some of each.
   Splitting a search across two fields is how "revenue report" starts matching
@@ -39,19 +40,20 @@ import re
 from typing import Any
 
 from sqlalchemy import (
-    ARRAY,
     Boolean,
     Select,
     Text,
     and_,
     case,
-    cast,
     func,
     literal,
+    literal_column,
     not_,
     null,
     or_,
     select,
+    true,
+    type_coerce,
     union,
     union_all,
 )
@@ -59,6 +61,7 @@ from sqlalchemy import (
 from auto_ontology.catalog.constants import Labels, TableTypes
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store
+from auto_ontology.dal.types import JSONList
 from auto_ontology.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_PQL_ANALYSIS,
@@ -221,18 +224,23 @@ _SEPARATORS = (
 #:
 #: ``LIKE`` has wildcards of its own that a search term must not smuggle in, and
 #: ``_`` is the one that matters: it is legal in an identifier *and* a
-#: single-character wildcard to Postgres, so an unescaped search for ``order_id``
+#: single-character wildcard to ``LIKE``, so an unescaped search for ``order_id``
 #: would also match ``orderXid``.
 _LIKE_ESCAPE = "\\"
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
-# Typed NULLs, so every arm of the UNION agrees on a column's type. Postgres
-# rejects a bare NULL in a union branch it cannot infer a type for, and these
-# are immutable expressions, so one instance each is enough.
-_NULL_TEXT = cast(null(), Text)
-_NULL_BOOL = cast(null(), Boolean)
-_NULL_TEXT_ARRAY = cast(null(), ARRAY(Text))
+# Typed NULLs for the union branches that have nothing to say about a column.
+# SQLAlchemy takes a union column's type from its first branch, which is
+# Database, so these types are what decode every row: `synonyms` above all,
+# whose JSON text only becomes a list through `JSONList`.
+_NULL_TEXT = type_coerce(null(), Text)
+_NULL_BOOL = type_coerce(null(), Boolean)
+_NULL_SYNONYMS = type_coerce(null(), JSONList())
+
+#: JSON_TABLE's path and COLUMNS clause, which SQLAlchemy has no construct for:
+#: one row per string in ``term.synonyms``.
+_SYNONYM_ROWS = literal_column("'$[*]' COLUMNS (synonym TEXT PATH '$')")
 
 
 def is_view_table_type(table_type: str | None) -> bool:
@@ -286,7 +294,7 @@ def synonym_word_tokens(search_term: str) -> list[str]:
 def synonym_matches_tokens(synonym: str, tokens: list[str]) -> bool:
     """True when every token appears as a whole word in *synonym*.
 
-    The Python twin of the regex :func:`_synonym_exists` sends to Postgres. Both
+    The Python twin of the regex :func:`_synonym_match` sends to the database. Both
     exist because the database decides which Terms come back and the service
     decides which of their synonyms to show, and a disagreement between the two
     surfaces as a hit with no visible reason for being there.
@@ -355,9 +363,9 @@ def _certified_text():
     both = and_(s.term.c.name_certified, s.term.c.description_certified)
     either = or_(s.term.c.name_certified, s.term.c.description_certified)
     return case(
-        (both, cast(literal("certified"), Text)),
-        (either, cast(literal("partial"), Text)),
-        else_=cast(literal("pending"), Text),
+        (both, literal("certified", Text)),
+        (either, literal("partial", Text)),
+        else_=literal("pending", Text),
     )
 
 
@@ -547,13 +555,13 @@ def _hit_select(
         table.c.id.label("id"),
         table.c.name.label("name"),
         (table.c.description if described else _NULL_TEXT).label("description"),
-        cast(literal(label), Text).label("label"),
+        literal(label, Text).label("label"),
         (_NULL_TEXT if table_type is None else table_type).label("table_type"),
         (_NULL_TEXT if certified is None else certified).label("certified"),
         (_NULL_BOOL if certified_flag is None else certified_flag).label(
             "certified_flag"
         ),
-        (_NULL_TEXT_ARRAY if synonyms is None else synonyms).label("synonyms"),
+        (_NULL_SYNONYMS if synonyms is None else synonyms).label("synonyms"),
         (_NULL_BOOL if synonym_hit is None else synonym_hit).label("synonym_hit"),
     )
 
@@ -615,11 +623,11 @@ def _term_select(synonym_tokens: list[str]):
         LABEL_TERM,
         certified=_certified_text(),
         synonyms=s.term.c.synonyms,
-        synonym_hit=_synonym_exists(synonym_tokens) if synonym_tokens else None,
+        synonym_hit=_synonym_match(synonym_tokens) if synonym_tokens else None,
     )
 
 
-def _synonym_exists(synonym_tokens: list[str]):
+def _synonym_match(synonym_tokens: list[str]):
     """Whole-word match of every token against one of the Term's synonyms.
 
     All tokens must land in the *same* synonym, which is what makes searching
@@ -627,30 +635,35 @@ def _synonym_exists(synonym_tokens: list[str]):
     one alias mentioning business and another mentioning units.
 
     Tokens are ``[a-z0-9]+`` by construction, so they are safe to concatenate
-    into a pattern -- there is no regex metacharacter left to escape.
+    into a pattern -- there is no regex metacharacter left to escape. The
+    boundaries are spelled out rather than ICU's ``\\b``, which counts ``_`` as
+    a word character and so would part from :func:`synonym_matches_tokens`.
+
+    An uncorrelated ``IN`` over its own copy of ``term``, not an ``EXISTS``
+    correlated to the outer row: on NDB, ``JSON_TABLE`` over an outer row's
+    TEXT column in a WHERE clause reads an empty document and so matches
+    nothing (or fails with error 3141).
     """
-    # ``render_derived`` and not ``alias``: the alias alone emits
-    # ``AS syn``, which names the table but leaves its one column called ``syn``
-    # too, so ``syn.synonym`` is then an undefined column at runtime. This emits
-    # ``AS syn(synonym)``, naming both.
+    term = s.term.alias("synonym_term")
     synonym = (
-        func.unnest(s.term.c.synonyms).table_valued("synonym").render_derived("syn")
+        func.json_table(term.c.synonyms, _SYNONYM_ROWS)
+        .table_valued("synonym")
+        .alias("syn")
     )
-    return (
-        select(literal(1))
-        .select_from(synonym)
+    return s.term.c.id.in_(
+        select(term.c.id)
+        .select_from(term.join(synonym, true()))
         .where(
-            and_(
-                *(
-                    func.lower(synonym.c.synonym).op("~")(
-                        f"(^|[^a-z0-9]){token}([^a-z0-9]|$)"
-                    )
-                    for token in synonym_tokens
+            *(
+                func.regexp_like(
+                    func.lower(synonym.c.synonym),
+                    f"(^|[^a-z0-9]){token}([^a-z0-9]|$)",
+                    "c",
+                    type_=Boolean,
                 )
+                for token in synonym_tokens
             )
         )
-        .correlate(s.term)
-        .exists()
     )
 
 
@@ -700,7 +713,7 @@ def _synonym_term_select(
         return None
     aliased = _term_select(synonym_tokens).where(
         _term_is_visible(),
-        _synonym_exists(synonym_tokens),
+        _synonym_match(synonym_tokens),
         not_(
             func.coalesce(
                 _match_where(
@@ -932,21 +945,23 @@ def _list_rank(
 
     Mirrors ``auto_ontology.server.search.service.rank_key`` so LIMIT keeps the same 200
     rows that Python would have picked from the full match set. Without this,
-    Postgres fills the cap from the first UNION ALL branches (Column before
+    the database fills the cap from the first UNION ALL branches (Column before
     Table/View) and the later ranking only reorders that arbitrary subset.
     ``id`` is appended by the caller so equal ranks stay stable across plans.
 
-    Mirroring is the whole point, so both the bucket and the tiebreak have to
-    be the service's: ``synonym_hit`` rather than "has any alias" (see
-    :func:`_term_select`), and ``C`` rather than the database collation, which
-    orders equal-length names by locale rules Python's ``str`` does not share.
+    Mirroring is the whole point, so the bucket, the length and the tiebreak
+    all have to be the service's: ``synonym_hit`` rather than "has any alias"
+    (see :func:`_term_select`); ``char_length``, since MySQL's ``length``
+    counts bytes where Python's ``len`` counts characters; and
+    ``utf8mb4_bin``, code-point order as Python's ``str`` has it, whatever
+    collation the connection would otherwise bring.
     """
     name = func.lower(func.coalesce(name_col, ""))
     name_hit = _contains_all(name_col, tokens)
     return (
         case((name_hit, 0), (func.coalesce(synonym_hit_col, False), 1), else_=2),
-        func.length(name),
-        name.collate("C"),
+        func.char_length(name),
+        name.collate("utf8mb4_bin"),
     )
 
 
@@ -1005,11 +1020,8 @@ def fetch_global_search(
     ``LIMIT`` over the union fills the page from whichever branches come first
     -- Database, Schema, Column -- and can leave Table and View out of the list
     while their tabs still count them. Ranking first gives up the early exit
-    that unordered ``LIMIT`` allowed: Postgres now reads the whole match set to
-    sort it, and for a two-character query (see ``MIN_SEARCH_LENGTH``, which
-    documents why those are not indexable) that is a sequential scan of all
-    ten tables. The trade is deliberate -- a correct page for a slower worst
-    case.
+    that unordered ``LIMIT`` allowed: the database reads the whole match set to
+    sort it. The trade is deliberate -- a correct page for a slower worst case.
 
     *synonym_limit* caps the alias branch, which is otherwise as long as the
     catalog has Terms whose aliases match. The service seats only a bounded
@@ -1155,9 +1167,9 @@ def matching_id_selects(
 
     Statements rather than rows, because the caller does not want the rows
     either. ``auto_ontology.dal.tags.apply_labels_now_matched`` embeds these in an
-    ``INSERT ... SELECT`` and a ``DELETE``, so a rule matching fifty thousand
-    columns moves no id into Python and back — Postgres reads the match and
-    writes the labels without the result set ever leaving it. That is also why
+    ``INSERT ... SELECT``, so a rule matching fifty thousand columns moves no id
+    into Python and back — the database reads the match and writes the labels
+    without the result set ever leaving it. That is also why
     they are keyed by label: ``tag_target`` has a column per kind, so each kind
     is its own statement whichever way it is used.
 
@@ -1165,7 +1177,7 @@ def matching_id_selects(
     cap (see :func:`_list_rank`), and with no cap there is nothing for it to
     decide -- so dropping it is not a shortcut but the absence of a question.
     It is also what makes this cheaper than the list it mirrors: ``ORDER BY``
-    is what forces Postgres to read the whole match set before returning
+    is what forces the database to read the whole match set before returning
     anything, and without it these stream.
 
     Only ``id`` is selected, for the same reason: a label needs something to
@@ -1215,7 +1227,7 @@ def matching_id_selects(
 
         if label == LABEL_TERM:
             if aliases:
-                match = or_(match, _synonym_exists(aliases))
+                match = or_(match, _synonym_match(aliases))
             selects[label] = select(table.c.id).where(
                 _term_is_visible(), _all_of(match, tagged, located)
             )

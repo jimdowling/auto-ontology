@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Select, Text, exists, literal, not_, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import Select, and_, select
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import chunks, update_returning
 from auto_ontology.dal.session import IN_QUERY_BATCH, store, write_transaction
 from auto_ontology.dal.tags import (
     PII_TAG_NAME,
@@ -18,35 +18,34 @@ from auto_ontology.dal.tags import (
     TARGET_SQL_ATTRIBUTE,
     detach_tag,
     get_tag_by_name,
+    insert_labels,
 )
 
 
 def mark_columns_pii_processed(column_ids: list[str]) -> int:
     """Mark successfully classified catalog columns as processed.
 
-    Ids are updated in batches of :data:`IN_QUERY_BATCH`. A first ingest of a
-    large catalog can have more columns than psycopg's 65535 bind parameters,
-    and a single ``IN`` of that many literals would raise -- silently, since
-    ingest swallows a detection failure, and permanently, since nothing would
-    then be marked processed to shrink the next pass.
+    Returns how many were not marked already. Ids are updated in batches of
+    :data:`IN_QUERY_BATCH`, each its own transaction. A first ingest of a large
+    catalog can have more columns than one RonDB transaction may change, and
+    one update over all of them would fail -- silently, since ingest swallows a
+    detection failure, and permanently, since nothing would then be marked
+    processed to shrink the next pass.
     """
 
-    if not column_ids:
-        return 0
-
     marked = 0
-    for offset in range(0, len(column_ids), IN_QUERY_BATCH):
-        chunk = column_ids[offset : offset + IN_QUERY_BATCH]
-        rows = store().query_write(
-            s.catalog_column.update()
-            .where(
-                s.catalog_column.c.id.in_(chunk),
-                s.catalog_column.c.pii_processed.is_(False),
+    for chunk in chunks(column_ids, IN_QUERY_BATCH):
+        marked += len(
+            update_returning(
+                s.catalog_column,
+                and_(
+                    s.catalog_column.c.id.in_(chunk),
+                    s.catalog_column.c.pii_processed.is_(False),
+                ),
+                {"pii_processed": True},
+                [s.catalog_column.c.id],
             )
-            .values(pii_processed=True)
-            .returning(s.catalog_column.c.id)
         )
-        marked += len(rows)
     return marked
 
 
@@ -154,54 +153,38 @@ def tag_attributes_of_tagged_columns(tag_id: str) -> tuple[int, int]:
 
     Labels carry no ``tagged_by`` and no ``rule_id``, which the UI reads as
     "Auto Generated". A label already on the attribute keeps its source.
+
+    Each batch of :data:`IN_QUERY_BATCH` candidates is labelled and marked
+    processed in one transaction, so a failure keeps the batches before it and
+    the next pass continues with the rest.
     """
     applied: list[int] = []
-    stored = s.tag_target.alias("stored")
-    with write_transaction():
-        for column, attribute, candidates in (
-            (
-                s.tag_target.c.column_attribute_id,
-                s.column_attribute,
-                _column_attributes_of_tagged_columns,
-            ),
-            (
-                s.tag_target.c.sql_attribute_id,
-                s.sql_attribute,
-                _sql_attributes_of_tagged_columns,
-            ),
-        ):
-            found = candidates(tag_id).subquery()
-            rows = store().query_write(
-                insert(s.tag_target)
-                .from_select(
-                    ["tag_id", column.name],
-                    select(literal(tag_id, Text), found.c.id).where(
-                        not_(
-                            exists(
-                                select(literal(1)).where(
-                                    stored.c.tag_id == tag_id,
-                                    stored.c[column.name] == found.c.id,
-                                )
-                            )
-                        )
-                    ),
+    for kind, attribute, candidates in (
+        (
+            TARGET_COLUMN_ATTRIBUTE,
+            s.column_attribute,
+            _column_attributes_of_tagged_columns,
+        ),
+        (
+            TARGET_SQL_ATTRIBUTE,
+            s.sql_attribute,
+            _sql_attributes_of_tagged_columns,
+        ),
+    ):
+        # Read into Python rather than embedded in the update: MySQL refuses an
+        # UPDATE whose WHERE reads the table it updates, and the candidates are
+        # filtered on the attribute's own `pii_processed`.
+        ids = [row["id"] for row in store().query_read(candidates(tag_id))]
+        labelled = 0
+        for batch in chunks(ids, IN_QUERY_BATCH):
+            with write_transaction():
+                labelled += insert_labels(kind, [tag_id], batch)
+                store().query_write(
+                    attribute.update()
+                    .where(attribute.c.id.in_(batch))
+                    .values(pii_processed=True)
                 )
-                .on_conflict_do_nothing()
-                .returning(s.tag_target.c.id)
-            )
-            applied.append(len(rows))
-            # The candidate set again rather than ids read back into Python: a
-            # first pass over a large catalog can have more candidates than
-            # psycopg's 65535 bind parameters, and an `IN` of that many
-            # literals would raise -- silently, since the caller swallows a
-            # propagation failure, and permanently, since nothing would then be
-            # marked processed to shrink the next pass. The statement's
-            # snapshot still sees every candidate unprocessed.
-            store().query_write(
-                attribute.update()
-                .where(attribute.c.id.in_(select(found.c.id)))
-                .values(pii_processed=True)
-            )
+        applied.append(labelled)
     return applied[0], applied[1]
 
 
@@ -311,7 +294,7 @@ def untag_attributes_of_columns_being_deleted(column_ids: list[str]) -> None:
     """Drop PII from attributes before *column_ids* leave the catalog.
 
     Ingest deletes dropped columns (and whole tables/schemas) without going
-    through the tags API. Postgres then cascades the column's own label and
+    through the tags API. The database then cascades the column's own label and
     the SQL / HAS_ATTRIBUTE edges, which would leave PII on the attributes.
     Take PII off the columns first so SQL realign does not still see them as
     tagged, then reuse :func:`untag_attributes_of_column`. One transaction

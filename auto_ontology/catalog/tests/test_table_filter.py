@@ -133,7 +133,7 @@ def test_get_connectors_passes_the_filter_to_every_connector(monkeypatch) -> Non
     through — built connectors with no filter at all. The pattern was stored and
     displayed correctly, and ingestion quietly took every table anyway.
     """
-    from auto_ontology.connectors import registry
+    from auto_ontology.connectors import hopsworks, registry
 
     captured: dict = {}
 
@@ -143,10 +143,17 @@ def test_get_connectors_passes_the_filter_to_every_connector(monkeypatch) -> Non
         return SimpleNamespace(database_name="db", close=lambda: None)
 
     monkeypatch.setattr(registry, "create_connector", fake_create_connector)
-    monkeypatch.setattr(registry, "build_connection_string", lambda conn: "sqlite:///x")
+    monkeypatch.setattr(hopsworks, "connection_string", lambda source: "sqlite:///x")
     monkeypatch.setattr(
         "auto_ontology.dal.connections.list_connections",
-        lambda: [{"database": "db", "type": "sqlite", "table_deny_regex": "^tmp_"}],
+        lambda: [
+            {
+                "database_name": "db",
+                "data_source": "warehouse",
+                "schemas": ["sales"],
+                "table_regex": "^orders",
+            }
+        ],
     )
     monkeypatch.setattr(registry, "_connectors", None)
 
@@ -155,6 +162,8 @@ def test_get_connectors_passes_the_filter_to_every_connector(monkeypatch) -> Non
     finally:
         monkeypatch.setattr(registry, "_connectors", None)
 
+    assert captured["schemas"] == ["sales"]
     assert captured["table_filter"] is not None
     assert captured["table_filter"].active is True
+    assert captured["table_filter"].keep("orders_2026") is True
     assert captured["table_filter"].keep("tmp_orders") is False

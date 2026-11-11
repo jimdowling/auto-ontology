@@ -2,10 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
-import Image from 'next/image';
-
 type ExplorationLoaderProps = {
 	overlay?: boolean;
 };
@@ -18,13 +14,11 @@ export const ExplorationLoader = ({ overlay = false }: ExplorationLoaderProps) =
 		role="status"
 		aria-label="Loading exploration"
 	>
-		<Image
-			src="/exploration-loader.svg"
+		<img
+			src={`${import.meta.env.BASE_URL}exploration-loader.svg`}
 			alt=""
 			width={720}
 			height={430}
-			unoptimized
-			loading="eager"
 			className="h-auto w-full max-w-[720px]"
 		/>
 	</div>

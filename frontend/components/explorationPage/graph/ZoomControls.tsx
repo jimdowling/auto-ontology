@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, useState } from 'react';
 import type { GraphController } from '@/components/explorationPage/graph/GraphCanvas';
 import { Button } from '@/common/Button';

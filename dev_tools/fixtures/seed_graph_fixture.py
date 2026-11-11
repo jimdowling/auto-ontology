@@ -489,8 +489,15 @@ def main() -> None:
     )
 
     _stub_embedding()
+    build(reset=args.reset)
 
-    if args.reset:
+
+def build(*, reset: bool) -> None:
+    """Write the fixture into the selected store; ``reset`` empties it first.
+
+    The caller stubs the embed calls (see :func:`_stub_embedding`).
+    """
+    if reset:
         reset_graph()
 
     logger.info("ingesting catalogs...")

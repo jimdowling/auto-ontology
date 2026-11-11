@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useMemo } from 'react';
 import type { ParsedTable, TableRow } from '@/lib/parseSqlResponse';
 import { EmptyState } from '@/common/EmptyState';

@@ -7,9 +7,9 @@
 Retrieval reads a hit's ``metadata["id"]``, ``label``, ``name`` and friends
 from the *top level* of the stored metadata, so a converter that tucked them
 away, or a search that returned something else, would make every hit look
-empty without raising. The round trip below writes through the real
-:class:`PostgresVDB` and reads back through the real :class:`Retriever`; only
-the embedding endpoint is replaced.
+empty without raising. The round trip below writes through the in-memory
+store, which shares the feature-group store's interface, and reads back
+through the real :class:`Retriever`; only the embedding endpoint is replaced.
 """
 
 from __future__ import annotations
@@ -17,13 +17,10 @@ from __future__ import annotations
 import uuid
 from typing import Any, Iterator
 
-import psycopg
 import pytest
 
-from auto_ontology.infra.postgres import get_postgres_connection_string
 from auto_ontology.utils.embedding import EmbedParams
 from auto_ontology.utils.embedding_rows import build_embed_row
-from auto_ontology.vdb.postgres import PostgresVDB
 from auto_ontology.vdb.records import to_vdb_records, write_embedded_rows
 
 _DIMENSIONS = 2048
@@ -98,7 +95,7 @@ def test_a_dataframe_is_accepted() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Round trip through Postgres
+# Round trip through a store with the vector-store interface
 # ---------------------------------------------------------------------------
 
 
@@ -109,25 +106,12 @@ def _unit(axis: int) -> list[float]:
 
 
 @pytest.fixture
-def vdb() -> Iterator["PostgresVDB"]:
-    connection_string = get_postgres_connection_string()
-    try:
-        psycopg.connect(connection_string, connect_timeout=3).close()
-    except Exception as exc:  # noqa: BLE001 -- no database, nothing to assert
-        pytest.skip(f"postgres not reachable: {exc}")
+def vdb() -> Iterator[Any]:
+    from auto_ontology.vdb.memory import MemoryVDB
 
-    name = f"probe_{uuid.uuid4().hex[:8]}"
-    store = PostgresVDB(
-        connection_string=connection_string,
-        collection_name=name,
-        schema_name="vdb",
-    )
-    try:
-        yield store
-    finally:
-        store.close()
-        with psycopg.connect(connection_string) as conn:
-            conn.execute(f"DROP TABLE IF EXISTS vdb.{name}")
+    MemoryVDB.clear()
+    yield MemoryVDB.collection(f"probe_{uuid.uuid4().hex[:8]}")
+    MemoryVDB.clear()
 
 
 def test_written_rows_come_back_from_a_search(

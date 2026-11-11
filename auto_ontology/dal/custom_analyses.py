@@ -28,7 +28,7 @@ from auto_ontology.server.sql_utils import SqlParseError
 
 if TYPE_CHECKING:
     from auto_ontology.utils.embedding import EmbedParams
-    from auto_ontology.vdb.postgres import PostgresVDB
+    from auto_ontology.vdb.feature_group import FeatureGroupVDB
 
 logger = logging.getLogger(__name__)
 
@@ -525,7 +525,7 @@ def _custom_analysis_docs(analysis_id: str | None) -> list[dict[str, Any]]:
 
 def embed_custom_analyses(
     embed_params: "EmbedParams",
-    vdb: "PostgresVDB",
+    vdb: "FeatureGroupVDB",
     analysis_id: str | None = None,
     database_name: str | None = None,
 ) -> None:
@@ -544,7 +544,7 @@ def embed_custom_analyses(
     for item in docs:
         node_id = item.get("id")
         # A stored row key, not a reference to the store -- see the note in
-        # pg/pql_analyses.py.
+        # pql_analyses.py.
         path = (
             f"auto_ontology:{node_id}"
             if node_id is not None

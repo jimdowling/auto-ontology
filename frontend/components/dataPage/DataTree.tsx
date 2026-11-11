@@ -2,11 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { Link, useNavigate } from 'react-router';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { DataModels } from '@/enums/datasources';
 import { Icon, IconName } from '@/common/icons';
@@ -96,23 +93,9 @@ function useOpenBranch(
 	selectedId: string | undefined,
 	defaultOpen: boolean,
 ) {
-	// Deliberately starts from `defaultOpen` rather than reading
-	// `readPersistedOpenState()` directly here — this initializer runs
-	// during SSR too, where `window` (and so any persisted state) is always
-	// unavailable, so reading it here would make the very first client
-	// render disagree with the server-rendered HTML and force React to
-	// reconcile a hydration mismatch. Persisted state is applied once below
-	// instead, using the same "adjust state during rendering" pattern
-	// `prevSelectedId` already uses further down — React re-renders before
-	// committing/hydrating, so the corrected value is what actually reaches
-	// the DOM, never a mismatch.
-	const [open, setOpenState] = useState(() => focusInsideSubtree || defaultOpen);
-	const [hasAppliedPersisted, setHasAppliedPersisted] = useState(false);
-	if (!hasAppliedPersisted) {
-		setHasAppliedPersisted(true);
-		const persisted = readPersistedOpenState()[nodeId];
-		if (persisted !== undefined) setOpenState(focusInsideSubtree || persisted);
-	}
+	const [open, setOpenState] = useState(
+		() => focusInsideSubtree || (readPersistedOpenState()[nodeId] ?? defaultOpen),
+	);
 	const [prevSelectedId, setPrevSelectedId] = useState(selectedId);
 	if (selectedId !== prevSelectedId) {
 		setPrevSelectedId(selectedId);
@@ -146,7 +129,7 @@ export type DataTreeProps = {
 function rowClassName(selected: boolean) {
 	return `flex min-h-9 cursor-pointer items-center gap-1 rounded-lg text-left text-sm no-underline transition-colors ${
 		selected
-			? 'bg-[#76b900]/15 font-medium text-heading shadow-sm ring-1 ring-[#76b900]/30 dark:text-zinc-100'
+			? 'bg-accent/15 font-medium text-heading shadow-sm ring-1 ring-accent/30 dark:text-zinc-100'
 			: 'text-heading hover:bg-zinc-100/90 dark:text-zinc-200 dark:hover:bg-zinc-800/70'
 	}`;
 }
@@ -230,7 +213,7 @@ function Row({
 
 	if (href && !hasChildren) {
 		return (
-			<Link href={href} prefetch={false} className={rowClassName(selected)} style={style}>
+			<Link to={href} className={rowClassName(selected)} style={style}>
 				{inner}
 			</Link>
 		);
@@ -301,13 +284,13 @@ function TableBlock({
 	pathBase: string;
 	onLoadColumns: (tableCompoundId: string) => void;
 }) {
-	const router = useRouter();
+	const navigate = useNavigate();
 	const focusInsideTable = focusIsInsideSubtree(tableFocusPath, selectedId);
 	const [open, setOpen] = useOpenBranch(tableFocusPath, focusInsideTable, selectedId, false);
 	const fetchedOnce = useRef(false);
 	const syncTableFocus = useCallback(() => {
-		router.replace(catalogPathFromFocusId(tableFocusPath, pathBase), { scroll: false });
-	}, [router, pathBase, tableFocusPath]);
+		navigate(catalogPathFromFocusId(tableFocusPath, pathBase), { replace: true });
+	}, [navigate, pathBase, tableFocusPath]);
 	const activateTable = useCallback(() => {
 		setOpen((o) => !o);
 		syncTableFocus();
@@ -374,7 +357,7 @@ function SchemaBlock({
 	onLoadColumns: (tableCompoundId: string) => void;
 	onLoadTables: (schemaCompoundId: string) => Promise<void>;
 }) {
-	const router = useRouter();
+	const navigate = useNavigate();
 	const schemaFocusPath = `${databaseId}|${schema.id}`;
 	const schemaLoadRef = schemaFocusPath;
 	const focusInsideSchema = focusIsInsideSubtree(schemaFocusPath, selectedId);
@@ -382,8 +365,8 @@ function SchemaBlock({
 	const hasChildren = (schema.tables_count ?? 0) > 0;
 	const [loadingTables, setLoadingTables] = useState(false);
 	const syncSchemaFocus = useCallback(() => {
-		router.replace(catalogPathFromFocusId(schemaFocusPath, pathBase), { scroll: false });
-	}, [router, pathBase, schemaFocusPath]);
+		navigate(catalogPathFromFocusId(schemaFocusPath, pathBase), { replace: true });
+	}, [navigate, pathBase, schemaFocusPath]);
 	const activateSchemaBranch = useCallback(() => {
 		setOpen((o) => !o);
 		syncSchemaFocus();
@@ -459,14 +442,14 @@ function DatabaseBlock({
 	onLoadSchemas: (dbId: string) => Promise<void>;
 	onLoadTables: (schemaCompoundId: string) => Promise<void>;
 }) {
-	const router = useRouter();
+	const navigate = useNavigate();
 	const focusInsideDatabase = focusIsInsideSubtree(database.id, selectedId);
 	const [open, setOpen] = useOpenBranch(database.id, focusInsideDatabase, selectedId, false);
 	const hasChildren = database.schemas.length > 0 || !open;
 	const [loadingSchemas, setLoadingSchemas] = useState(false);
 	const syncDatabaseFocus = useCallback(() => {
-		router.replace(catalogPathFromFocusId(database.id, pathBase), { scroll: false });
-	}, [router, pathBase, database.id]);
+		navigate(catalogPathFromFocusId(database.id, pathBase), { replace: true });
+	}, [navigate, pathBase, database.id]);
 	const activateDatabaseBranch = useCallback(() => {
 		setOpen((o) => !o);
 		syncDatabaseFocus();

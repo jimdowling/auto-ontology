@@ -9,16 +9,18 @@ byte after normalisation. This is what catches a read that still returns *a*
 plausible answer after a change, rather than the right one.
 
 **Re-recording is a last resort, not a fix.** A golden that changes because the
-code changed is the test doing its job::
+code changed is the test doing its job. The goldens were recorded on upstream's
+Postgres store; the RonDB port replays them unchanged, which is the parity
+check between the two. Re-record only when a change to DAL output is
+*intended*, against a store seeded with the fixture::
 
-    docker compose up -d postgres
-    uv run --no-sync python -m dev_tools.fixtures.seed_fixtures
+    uv run --no-sync python -m dev_tools.fixtures.seed_fixtures   # pagila needs POSTGRES_*
     uv run --no-sync python -m dev_tools.fixtures.seed_graph_fixture --reset
-    uv run --no-sync pytest auto_ontology/dal/tests/test_golden.py
-
-Re-record only when a change to DAL output is *intended*::
-
     uv run --no-sync python -m dev_tools.fixtures.capture_dal_golden
+
+The replay seeds that fixture itself, from the sources named in
+``CONNECTION_STRINGS`` (the pagila Postgres database and the chinook SQLite
+file), and empties the store again afterwards so later tests start clean.
 
 Results are normalised before comparison — ids become stable tokens, timestamps
 are redacted, and undirected edges are oriented consistently. See
@@ -40,25 +42,39 @@ from dev_tools.fixtures import capture_dal_golden
 GOLDEN = capture_dal_golden.load_golden()
 
 
-def _require_fixture():
-    """Skip when there is no reachable fixture.
+def _seed() -> None:
+    from auto_ontology.server.custom_analyses import service as ca_service
+    from auto_ontology.server.sql_attributes import service as sa_service
+    from dev_tools.fixtures import seed_graph_fixture
 
-    Worth remembering as a shape: a skip guard naming the wrong dependency
-    turns a whole suite off silently, and still reports green.
-    """
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_USER not set; the golden fixture is unavailable")
-    try:
-        return capture_dal_golden.capture_all()
-    except SystemExit as exc:  # _fixture_ids() raises this when unseeded
-        pytest.skip(str(exc))
-    except Exception as exc:  # noqa: BLE001 — no reachable graph
-        pytest.skip(f"fixture graph unavailable: {exc}")
+    with pytest.MonkeyPatch.context() as patch:
+        for module, name in (
+            (sa_service, "_embed_sql_attribute"),
+            (sa_service, "_reembed_sql_attribute"),
+            (ca_service, "embed_custom_analyses"),
+        ):
+            patch.setattr(module, name, lambda *args, **kwargs: None)
+        seed_graph_fixture.build(reset=True)
 
 
 @pytest.fixture(scope="module")
 def live():
-    return _require_fixture()
+    """The captured reads; skips without a store or without fixture sources.
+
+    Worth remembering as a shape: a skip guard naming the wrong dependency
+    turns a whole suite off silently, and still reports green.
+    """
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set; the golden fixture is unavailable")
+    if not os.environ.get("CONNECTION_STRINGS"):
+        pytest.skip("CONNECTION_STRINGS not set; the fixture sources are unavailable")
+    from dev_tools.fixtures import seed_graph_fixture
+
+    _seed()
+    try:
+        yield capture_dal_golden.capture_all()
+    finally:
+        seed_graph_fixture.reset_graph()
 
 
 def test_golden_file_exists() -> None:
@@ -95,11 +111,11 @@ def test_no_capture_raised() -> None:
     assert GOLDEN["errors"] == {}, f"captures raised: {GOLDEN['errors']}"
 
 
-#: Keys whose *presence* legitimately differs under Postgres, per read.
+#: Keys whose *presence* legitimately differs in the relational store, per read.
 #:
 #: These two reads return "every property of the node". A node carries only the
-#: properties something set; a row carries every column of its table. So under
-#: Postgres an unset property is `null` rather than absent, defaults appear, and
+#: properties something set; a row carries every column of its table. So in a
+#: table an unset property is `null` rather than absent, defaults appear, and
 #: the parent foreign key is visible — while `created`, which the graph stamped
 #: on every node and **nothing reads**, is gone: the catalog tables do not carry
 #: it and adding a column to satisfy a golden would be the tail wagging the dog.

@@ -2,125 +2,42 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Groups, membership, and the accounts they point at.
+"""Groups and their membership.
 
-Needs a migrated database. The account table is Prisma's, so CI's Alembic
-database does not have it; the fixture creates the columns this DAL reads
-when that table is absent and leaves a real one untouched.
+Members are Hopsworks usernames stored as given; the DAL reads no account
+table, so a member is reported by its stored id. Needs a migrated database.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 import os
 import uuid
 
 import pytest
-from sqlalchemy import text
 
 pytest.importorskip("sqlalchemy")
 
 from auto_ontology.dal import groups as dal  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
-from auto_ontology.infra.postgres import FRONTEND_SCHEMA  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
-def require_schema() -> Iterator[None]:
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
-    store().query_read(text("SELECT 1 FROM user_group LIMIT 1"))
-
-    schema_existed = bool(
-        store().query_read(
-            text("SELECT 1 FROM pg_namespace WHERE nspname = :schema"),
-            {"schema": FRONTEND_SCHEMA},
-        )
-    )
-    table_existed = bool(
-        store().query_read(
-            text(
-                """
-                SELECT 1
-                  FROM pg_class AS class
-                  JOIN pg_namespace AS namespace
-                    ON namespace.oid = class.relnamespace
-                 WHERE namespace.nspname = :schema
-                   AND class.relname = 'user'
-                """
-            ),
-            {"schema": FRONTEND_SCHEMA},
-        )
-    )
-
-    store().query_write(text(f"CREATE SCHEMA IF NOT EXISTS {FRONTEND_SCHEMA}"))
-    store().query_write(
-        text(
-            f"""
-            CREATE TABLE IF NOT EXISTS {FRONTEND_SCHEMA}."user" (
-                id text PRIMARY KEY,
-                name text NOT NULL,
-                email text NOT NULL,
-                "emailVerified" boolean NOT NULL DEFAULT false,
-                "createdAt" timestamptz NOT NULL DEFAULT now(),
-                "updatedAt" timestamptz NOT NULL DEFAULT now(),
-                role text,
-                banned boolean NOT NULL DEFAULT false
-            )
-            """
-        )
-    )
-    try:
-        yield
-    finally:
-        if not table_existed:
-            store().query_write(text(f'DROP TABLE IF EXISTS {FRONTEND_SCHEMA}."user"'))
-        if not schema_existed:
-            schema_objects = store().query_read(
-                text(
-                    """
-                    SELECT 1
-                      FROM pg_class AS class
-                      JOIN pg_namespace AS namespace
-                        ON namespace.oid = class.relnamespace
-                     WHERE namespace.nspname = :schema
-                     LIMIT 1
-                    """
-                ),
-                {"schema": FRONTEND_SCHEMA},
-            )
-            if not schema_objects:
-                store().query_write(text(f"DROP SCHEMA IF EXISTS {FRONTEND_SCHEMA}"))
+def require_schema() -> None:
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
+    store().query_read(f"SELECT 1 FROM {s.user_group.name} LIMIT 1")
 
 
 @pytest.fixture
-def accounts():
-    """Two Better Auth accounts, removed with the groups this test creates."""
+def accounts() -> Iterator[Callable[..., str]]:
+    """Usernames sharing a prefix, removed with the groups this test creates."""
     prefix = f"grp-{uuid.uuid4().hex[:8]}"
     created: list[str] = []
 
-    def make(*, role: str = "viewer", name: str | None = None) -> str:
-        user_id = f"{prefix}-{len(created)}"
-        store().query_write(
-            text(
-                f"""
-                INSERT INTO {FRONTEND_SCHEMA}."user"
-                    (
-                        id, name, email, "emailVerified", "createdAt", "updatedAt",
-                        role, banned
-                    )
-                VALUES
-                    (:id, :name, :email, true, now(), now(), :role, false)
-                """
-            ),
-            {
-                "id": user_id,
-                "name": name or user_id,
-                "email": f"{user_id}@example.com",
-                "role": role,
-            },
-        )
+    def make(name: str | None = None) -> str:
+        user_id = f"{prefix}-{name or len(created)}"
         created.append(user_id)
         return user_id
 
@@ -129,16 +46,11 @@ def accounts():
     store().query_write(
         s.user_group.delete().where(s.user_group.c.name.like(f"{prefix}%"))
     )
-    if created:
-        store().query_write(
-            text(f'DELETE FROM {FRONTEND_SCHEMA}."user" WHERE id = ANY(:ids)'),
-            {"ids": created},
-        )
 
 
 def test_a_group_keeps_its_members(accounts) -> None:
-    first = accounts(name="Ada")
-    second = accounts(name="Grace", role="admin")
+    first = accounts("ada")
+    second = accounts("grace")
     prefix = first.rsplit("-", 1)[0]
 
     created = dal.create_group(
@@ -151,9 +63,10 @@ def test_a_group_keeps_its_members(accounts) -> None:
 
     assert created["description"] == "books"
     assert created["role"] == "viewer"
-    assert [user["name"] for user in created["users"]] == ["Ada", "Grace"]
-    assert created["users"][0]["role"] == "viewer"
-    assert created["users"][1]["role"] == "admin"
+    assert created["users"] == [
+        {"id": first, "name": first},
+        {"id": second, "name": second},
+    ]
 
     again = dal.get_group(created["id"])
     assert again is not None
@@ -180,23 +93,9 @@ def test_names_collide_case_insensitively(accounts) -> None:
         )
 
 
-def test_an_unknown_member_is_refused(accounts) -> None:
-    user_id = accounts()
-    prefix = user_id.rsplit("-", 1)[0]
-    with pytest.raises(dal.UnknownGroupMembers) as refused:
-        dal.create_group(
-            name=f"{prefix} Finance",
-            description=None,
-            color="#000",
-            role="viewer",
-            user_ids=[user_id, "nobody"],
-        )
-    assert refused.value.user_ids == ["nobody"]
-
-
 def test_replacing_members_and_deleting_the_group(accounts) -> None:
-    first = accounts(name="Ada")
-    second = accounts(name="Grace")
+    first = accounts("ada")
+    second = accounts("grace")
     prefix = first.rsplit("-", 1)[0]
     created = dal.create_group(
         name=f"{prefix} Finance",
@@ -222,9 +121,9 @@ def test_replacing_members_and_deleting_the_group(accounts) -> None:
     assert dal.delete_group(created["id"]) is False
 
 
-def test_directory_lists_accounts_with_their_group_ids(accounts) -> None:
-    first = accounts(name="Ada")
-    second = accounts(name="Grace")
+def test_directory_lists_members_with_their_group_ids(accounts) -> None:
+    first = accounts("ada")
+    second = accounts("grace")
     prefix = first.rsplit("-", 1)[0]
     finance = dal.create_group(
         name=f"{prefix} Finance",
@@ -243,7 +142,11 @@ def test_directory_lists_accounts_with_their_group_ids(accounts) -> None:
 
     directory = dal.list_users_and_groups()
     by_id = {user["id"]: user for user in directory["users"]}
-    assert by_id[first]["groups"] == [finance["id"], legal["id"]]
+    assert by_id[first] == {
+        "id": first,
+        "name": first,
+        "groups": [finance["id"], legal["id"]],
+    }
     assert by_id[second]["groups"] == [legal["id"]]
 
 
@@ -260,21 +163,25 @@ def test_updating_a_missing_group_does_not_write_members(accounts) -> None:
     assert dal.get_group("missing-group") is None
 
 
-def test_a_deleted_account_stays_visible_on_the_group(accounts) -> None:
-    user_id = accounts(name="Ada")
-    prefix = user_id.rsplit("-", 1)[0]
-    created = dal.create_group(
+def test_a_name_race_lost_at_the_unique_key_is_still_name_taken(
+    accounts, monkeypatch
+) -> None:
+    """The check and the insert are separate statements; a create slipping
+    between them is caught by ``uq_user_group_name_lower`` instead."""
+    prefix = accounts().rsplit("-", 1)[0]
+    dal.create_group(
         name=f"{prefix} Finance",
         description=None,
         color="#000",
         role="viewer",
-        user_ids=[user_id],
+        user_ids=[],
     )
-    store().query_write(
-        text(f'DELETE FROM {FRONTEND_SCHEMA}."user" WHERE id = :id'),
-        {"id": user_id},
-    )
-
-    group = dal.get_group(created["id"])
-    assert group is not None
-    assert group["users"] == [{"id": user_id, "name": "", "email": "", "role": None}]
+    monkeypatch.setattr(dal, "_name_taken", lambda name, **kwargs: False)
+    with pytest.raises(dal.GroupNameTaken):
+        dal.create_group(
+            name=f"{prefix} FINANCE",
+            description=None,
+            color="#111",
+            role="viewer",
+            user_ids=[],
+        )

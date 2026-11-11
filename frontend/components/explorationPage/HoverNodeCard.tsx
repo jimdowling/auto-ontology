@@ -2,13 +2,10 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { Icon, IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { ExplorationLayer } from '@/enums/exploration';
 import type { ExplorationNode } from '@/types/exploration';
-import { ZonesRow } from '@/common/SinglePageComposer';
 
 type HoverNodeCardProps = {
 	node: ExplorationNode;
@@ -110,8 +107,6 @@ export const HoverNodeCard = ({ node, x, y }: HoverNodeCardProps) => {
 					))}
 				</dl>
 			)}
-
-			<ZonesRow zones={node.zones} />
 		</aside>
 	);
 };

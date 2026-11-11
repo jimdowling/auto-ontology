@@ -306,9 +306,13 @@ class _MySQLCursor:
     def __init__(self, reject: tuple[str, ...]) -> None:
         self.executed: list[tuple[str, Any]] = []
         self.attempted: list[str] = []
+        self.read_only_sessions = 0
         self._reject = reject
 
     def execute(self, sql: str, params: Any = None) -> None:
+        if sql == "SET SESSION TRANSACTION READ ONLY":
+            self.read_only_sessions += 1
+            return
         self.attempted.append(sql)
         for variable in self._reject:
             if variable in sql:
@@ -406,6 +410,17 @@ def test_mysql_without_timeout_sends_no_setting(monkeypatch: MonkeyPatch) -> Non
     database.execute("SELECT 1")
 
     assert cursor.executed == [("SELECT 1", None)]
+
+
+def test_every_mysql_statement_runs_in_a_read_only_session(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    database, cursor = _fake_mysql(monkeypatch)
+
+    database.execute("SELECT 1")
+    database.execute("SELECT 2", timeout_s=30)
+
+    assert cursor.read_only_sessions == 2
 
 
 # ----------------------------------------------------------------------

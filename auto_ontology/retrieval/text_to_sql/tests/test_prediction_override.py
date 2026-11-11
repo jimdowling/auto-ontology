@@ -151,8 +151,8 @@ def test_worker_submit_passes_prediction_through() -> None:
     worker.submit("q", prediction=True)
     worker.submit("q2")
 
-    assert sent[0][1] == ("q", True, None, None, [], None)
-    assert sent[1][1] == ("q2", None, None, None, [], None)
+    assert sent[0][1] == ("q", True, None, [], None)
+    assert sent[1][1] == ("q2", None, None, [], None)
 
 
 def test_worker_submit_accepts_every_field_by_keyword() -> None:
@@ -168,18 +168,10 @@ def test_worker_submit_accepts_every_field_by_keyword() -> None:
         "q",
         prediction=False,
         target_db="analytics",
-        subject_token="jwt",
         evidence="authoritative",
     )
 
-    assert sent[0][1] == (
-        "q",
-        False,
-        "analytics",
-        "jwt",
-        [],
-        "authoritative",
-    )
+    assert sent[0][1] == ("q", False, "analytics", [], "authoritative")
 
 
 def test_worker_payload_unpacks_as_the_loop_expects() -> None:
@@ -190,9 +182,9 @@ def test_worker_payload_unpacks_as_the_loop_expects() -> None:
     worker = PrewarmedWorker.__new__(PrewarmedWorker)
     worker._in_q = type("Q", (), {"put": lambda _self, item: sent.append(item)})()
 
-    worker.submit("q", prediction=True, target_db="db", subject_token="tok")
+    worker.submit("q", prediction=True, target_db="db")
 
-    question, prediction, target_db, subject_token, history, evidence = sent[0][1]
-    assert (question, prediction, target_db, subject_token) == ("q", True, "db", "tok")
+    question, prediction, target_db, history, evidence = sent[0][1]
+    assert (question, prediction, target_db) == ("q", True, "db")
     assert history == []
     assert evidence is None

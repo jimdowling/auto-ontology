@@ -97,9 +97,8 @@ export type Rule = {
 	/** Id of the user who saved it. */
 	created_by: string;
 	/**
-	 * The account that id names, added by the `/api/rules` route — the same join
-	 * the tag list does, since the ids are stored in the catalog and the accounts
-	 * live in the `frontend` schema.
+	 * The account that id names, added by `GET api/rules`, the same join the tag
+	 * list does.
 	 *
 	 * Null when the id names nobody: the account has since been deleted, which
 	 * these ids outlive because they are not foreign keys.

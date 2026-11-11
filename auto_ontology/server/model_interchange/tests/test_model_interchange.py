@@ -59,30 +59,12 @@ def _null_transaction():
 
 @pytest.fixture(autouse=True)
 def _no_live_connection_lookup():
-    """Sever the two connection lookups ``export_model`` reaches through.
-
-    ``service.export_model`` calls ``_dialect_by_database_name()``, which reads
-    ``get_connectors()`` and ``list_connections()`` — and the latter queries
-    Postgres. Patching only the ``dal`` calls each test names leaves that path
-    live, so these mock-backed tests quietly opened a connection and failed with
-    ``OperationalError`` on any machine without the local stack up. CI never
-    caught it: the workflow provides a Postgres service, so the call succeeded
-    there and returned nothing.
-
-    Autouse rather than per-test decorators so a test added later cannot
-    reopen the hole. Both boundaries are stubbed instead of
-    ``_dialect_by_database_name`` itself, which keeps its merge logic under
-    test; a test that wants real dialects can patch these with its own values.
-    """
-    with (
-        patch(
-            "auto_ontology.server.model_interchange.service.get_connectors",
-            return_value=[],
-        ),
-        patch(
-            "auto_ontology.server.model_interchange.service.list_connections",
-            return_value=[],
-        ),
+    """Sever the connector lookup ``export_model`` reaches through, which
+    otherwise reads the store and connects to every source. Autouse so a test
+    added later cannot reopen it."""
+    with patch(
+        "auto_ontology.server.model_interchange.service.get_connectors",
+        return_value=[],
     ):
         yield
 
@@ -635,29 +617,6 @@ def test_export_model_auto_ontology_keeps_every_represented_table(
     term = payload["semantic_layer"]["terms"][0]
     assert term["represents"] == ["tbl-1", "tbl-2"]
     assert len(term["columns_attributes"]) == 3
-
-
-def test_dialects_fall_back_to_saved_settings_when_a_database_is_unreachable(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """One unreachable database must not fail the whole export."""
-    with (
-        patch(
-            "auto_ontology.server.model_interchange.service.get_connectors",
-            side_effect=ConnectionError("Can't connect to MySQL server"),
-        ),
-        patch(
-            "auto_ontology.server.model_interchange.service.list_connections",
-            return_value=[
-                {"name": "dw", "type": "mysql"},
-                {"name": "wwi", "type": "postgresql"},
-            ],
-        ),
-    ):
-        dialects = service._dialect_by_database_name()
-
-    assert dialects == {"dw": "mysql", "wwi": "postgresql"}
-    assert "Can't connect to MySQL server" in caplog.text
 
 
 @patch(

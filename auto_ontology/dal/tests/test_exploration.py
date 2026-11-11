@@ -29,24 +29,23 @@ pytest.importorskip("sqlalchemy")
 
 from auto_ontology.dal import exploration as e  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.ops import insert_returning  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM sql_query__table LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.sql_query__table.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable: {exc}")
 
 
 def _add(table, **values) -> str:
-    return store().query_write(table.insert().values(**values).returning(table.c.id))[
-        0
-    ]["id"]
+    return insert_returning(table, values, [table.c.id])[0]["id"]
 
 
 def _link(table, **values) -> None:
@@ -375,9 +374,9 @@ def test_table_details_finds_terms_by_either_route(world) -> None:
     )
 
     details = e.fetch_table_exploration_details(world.tables["orders"])
-    assert {t["name"] for t in details["terms"]} == {
-        f"{world.prefix}-Order",
-        f"{world.prefix}-Customer",
+    assert {t["name"]: t["relationship_types"] for t in details["terms"]} == {
+        f"{world.prefix}-Order": ["REPRESENTS"],
+        f"{world.prefix}-Customer": ["SEMANTIC_FK"],
     }
     assert details["terms_total"] == 2
 
@@ -431,6 +430,110 @@ def test_an_out_of_zone_table_has_no_details(world) -> None:
     assert e.fetch_table_exploration_details(
         world.tables["secrets"], zone_ids=[zone_id]
     ) == {"queries": [], "terms": [], "terms_total": 0}
+
+
+# --------------------------------------------------------------------------
+# Term, column, attribute and statement details
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def linked(world):
+    """``orders.customer_id`` carries the Customer attribute both ways.
+
+    It *is* an instance of the attribute and also references it, so the
+    attribute's page has to report both link types on one column row, and the
+    Customer term reaches ``orders`` by both as well as ``customers`` by
+    REPRESENTS.
+    """
+    world.table("orders", columns=("id", "customer_id"))
+    world.table("customers", columns=("id",))
+    world.foreign_key("orders.customer_id", "customers.id")
+    world.term("Customer", represents=("customers",))
+    world.attribute = _add(
+        s.column_attribute,
+        name=f"{world.prefix}-customer-id",
+        source_column="customer_id",
+        term_name=f"{world.prefix}-Customer",
+        table_id=world.tables["orders"],
+    )
+    _link(
+        s.column_attribute__term,
+        attribute_id=world.attribute,
+        term_id=world.terms["Customer"],
+    )
+    for link in (s.column__has_attribute, s.column__semantic_fk):
+        _link(
+            link,
+            column_id=world.columns["orders.customer_id"],
+            attribute_id=world.attribute,
+        )
+    world.query = world.statement(f"SELECT 1 -- {world.prefix}", "orders", "customers")
+    _link(
+        s.sql_query__column,
+        sql_query_id=world.query,
+        column_id=world.columns["orders.customer_id"],
+    )
+    yield world
+    store().query_write(
+        s.column_attribute.delete().where(s.column_attribute.c.id == world.attribute)
+    )
+
+
+def test_term_details_label_each_table_by_how_it_is_reached(linked) -> None:
+    details = e.fetch_term_exploration_details(linked.terms["Customer"])
+    assert details["tables_total"] == 2
+    assert {t["name"]: t["relationship_types"] for t in details["tables"]} == {
+        f"{linked.prefix}_customers": ["REPRESENTS"],
+        f"{linked.prefix}_orders": ["HAS_ATTRIBUTE", "SEMANTIC_FK"],
+    }
+
+
+def test_attribute_details_carry_the_term_and_every_column(linked) -> None:
+    details = e.fetch_column_attribute_exploration_details(linked.attribute)
+    assert details["term"]["id"] == linked.terms["Customer"]
+    assert details["columns_total"] == 1
+    assert [(c["id"], c["relationship_types"]) for c in details["columns"]] == [
+        (linked.columns["orders.customer_id"], ["HAS_ATTRIBUTE", "SEMANTIC_FK"])
+    ]
+
+
+def test_column_details_reach_one_hop_in_every_direction(linked) -> None:
+    details = e.fetch_column_exploration_details(linked.columns["orders.customer_id"])
+    assert details["column_attribute"]["id"] == linked.attribute
+    assert details["foreign_key_column"]["id"] == linked.columns["customers.id"]
+    assert [q["id"] for q in details["sql_queries"]] == [linked.query]
+
+    target = e.fetch_column_exploration_details(linked.columns["customers.id"])
+    assert [c["id"] for c in target["referencing_columns"]] == [
+        linked.columns["orders.customer_id"]
+    ]
+
+
+def test_column_details_are_empty_out_of_zone(linked) -> None:
+    zone_id = linked.zone("Customers", "customers")
+    details = e.fetch_column_exploration_details(
+        linked.columns["orders.customer_id"], zone_ids=[zone_id]
+    )
+    assert details == {
+        "column_attribute": None,
+        "foreign_key_column": None,
+        "referencing_columns": [],
+        "sql_queries": [],
+    }
+
+
+def test_statement_details_list_what_hangs_off_it(linked) -> None:
+    details = e.fetch_sql_exploration_details(linked.query)
+    assert {t["id"] for t in details["tables"]} == {
+        linked.tables["orders"],
+        linked.tables["customers"],
+    }
+    assert [c["id"] for c in details["columns"]] == [
+        linked.columns["orders.customer_id"]
+    ]
+    assert details["custom_analyses"] == []
+    assert details["sql_attributes"] == []
 
 
 # --------------------------------------------------------------------------

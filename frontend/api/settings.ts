@@ -25,49 +25,49 @@ async function json<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 }
 
 export const promptsApi = {
-	get: () => json<Prompt[]>('/api/custom-prompts'),
+	get: () => json<Prompt[]>('api/custom-prompts'),
 
 	create: (data: { content?: string } = {}) =>
-		json<Prompt>('/api/custom-prompts', {
+		json<Prompt>('api/custom-prompts', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(data),
 		}),
 
 	update: (id: string, data: { content?: string }) =>
-		json<Prompt>(`/api/custom-prompts/${id}`, {
+		json<Prompt>(`api/custom-prompts/${id}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(data),
 		}),
 
-	delete: (id: string) => fetch(`/api/custom-prompts/${id}`, { method: 'DELETE' }),
+	delete: (id: string) => fetch(`api/custom-prompts/${id}`, { method: 'DELETE' }),
 };
 
 export const acronymsApi = {
-	get: () => json<Acronym[]>('/api/acronyms'),
+	get: () => json<Acronym[]>('api/acronyms'),
 
-	checkName: (name: string) => json<{ exists: boolean }>(`/api/acronyms?name=${name}`),
+	checkName: (name: string) => json<{ exists: boolean }>(`api/acronyms?name=${name}`),
 
 	create: (data: { name: string; description?: string }) =>
-		json<Acronym>('/api/acronyms', {
+		json<Acronym>('api/acronyms', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(data),
 		}),
 
 	update: (id: string, data: { name?: string; description?: string }) =>
-		json<Acronym>(`/api/acronyms/${id}`, {
+		json<Acronym>(`api/acronyms/${id}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(data),
 		}),
 
-	delete: (id: string) => fetch(`/api/acronyms/${id}`, { method: 'DELETE' }),
+	delete: (id: string) => fetch(`api/acronyms/${id}`, { method: 'DELETE' }),
 };
 
 export const semanticCompilationApi = {
-	get: () => json<{ enabled: boolean }>('/api/configurations/semantic-compilation'),
+	get: () => json<{ enabled: boolean }>('api/configurations/semantic-compilation'),
 
 	getStatus: () =>
 		json<{
@@ -75,23 +75,23 @@ export const semanticCompilationApi = {
 			running: boolean;
 			last_success_at: string | null;
 			last_failure_at: string | null;
-		}>('/api/semantic-compilation/status'),
+		}>('api/semantic-compilation/status'),
 
 	setEnabled: (enabled: boolean) =>
-		json<{ enabled: boolean }>('/api/configurations/semantic-compilation', {
+		json<{ enabled: boolean }>('api/configurations/semantic-compilation', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled }),
 		}),
 
-	reset: () => json<{ status: string }>('/api/semantic-compilation/reset', { method: 'POST' }),
+	reset: () => json<{ status: string }>('api/semantic-compilation/reset', { method: 'POST' }),
 };
 
 export const distinctValueProbingApi = {
-	get: () => json<{ enabled: boolean }>('/api/configurations/distinct-value-probing'),
+	get: () => json<{ enabled: boolean }>('api/configurations/distinct-value-probing'),
 
 	setEnabled: (enabled: boolean) =>
-		json<{ enabled: boolean }>('/api/configurations/distinct-value-probing', {
+		json<{ enabled: boolean }>('api/configurations/distinct-value-probing', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled }),
@@ -99,10 +99,10 @@ export const distinctValueProbingApi = {
 };
 
 export const piiDetectionApi = {
-	get: () => json<{ enabled: boolean }>('/api/configurations/pii-detection'),
+	get: () => json<{ enabled: boolean }>('api/configurations/pii-detection'),
 
 	setEnabled: (enabled: boolean) =>
-		json<{ enabled: boolean }>('/api/configurations/pii-detection', {
+		json<{ enabled: boolean }>('api/configurations/pii-detection', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled }),

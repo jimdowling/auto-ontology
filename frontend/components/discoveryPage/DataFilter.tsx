@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { datasources } from '@/api/datasources';
@@ -67,7 +65,7 @@ const toDataIds = (databases: Database[], selection: Set<string>): string[] => {
 /**
  * Which part of the catalog a search may reach.
  *
- * The same tree the zones screen selects with, stopped at the schema: tables
+ * The catalog tree stopped at the schema: tables
  * and columns are what the search *returns*, so offering them here would be
  * asking somebody to find the thing they are looking for. The reference
  * implementation draws its line in the same place.

@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 

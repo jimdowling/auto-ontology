@@ -5,6 +5,7 @@
 """LLM client construction and structured-output invocation wrappers."""
 
 import contextlib
+import json
 import logging
 import os
 import random
@@ -218,16 +219,30 @@ def _build_client(
     base_url: str,
     temperature: float,
     max_tokens: int,
+    role: str = "REASONING",
 ) -> BaseChatModel:
     """Build a chat client for the given model/endpoint.
 
-    OpenAI-family models (``openai/``, ``azure/``, ``aws/`` prefixes) go through
-    ``ChatOpenAI``, which supports structured output. Everything else uses
-    ``ChatNVIDIA``.
+    OpenAI-compatible endpoints go through ``ChatOpenAI``, which supports
+    structured output: models with an ``openai/``, ``azure/`` or ``aws/``
+    prefix, and any role whose ``<ROLE>_PROVIDER`` is ``openai`` -- which is how
+    a Hopsworks vLLM deployment, addressed by its bare deployment name, is
+    configured. ``<ROLE>_HEADERS`` (a JSON object) adds request headers, and
+    ``<ROLE>_THINKING=false`` turns a reasoning model's thinking off for that
+    role. Everything else uses ``ChatNVIDIA``.
     """
-    if model.startswith(("openai/", "azure/", "aws/")):
+    if (
+        model.startswith(("openai/", "azure/", "aws/"))
+        or resolve(role, "PROVIDER") == "openai"
+    ):
         from langchain_openai import ChatOpenAI
 
+        headers = json.loads(resolve(role, "HEADERS") or "{}")
+        extra_body = (
+            {"chat_template_kwargs": {"enable_thinking": False}}
+            if resolve(role, "THINKING") == "false"
+            else None
+        )
         return ChatOpenAI(
             model=model,
             api_key=api_key,
@@ -235,10 +250,11 @@ def _build_client(
             # temperature omitted: gpt-5.x/o-series reject any explicit value and
             # only allow the server default (1). Unset => langchain sends no
             # temperature field, so the provider default applies.
-            # temperature=temperature,
             max_tokens=max_tokens,
             timeout=LLM_INVOKE_TIMEOUT_S,
             max_retries=0,
+            default_headers=headers or None,
+            extra_body=extra_body,
         )
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
@@ -305,6 +321,7 @@ def get_non_reasoning_llm_client(
         base_url=_NON_REASONING_BASE_URL,
         temperature=temperature,
         max_tokens=max_tokens,
+        role="NON_REASONING",
     )
     _remember_non_reasoning(client)
     return client

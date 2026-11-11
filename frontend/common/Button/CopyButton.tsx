@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useRef, useState, type ButtonHTMLAttributes } from 'react';
 
 import { Icon, IconName } from '@/common/icons';
@@ -73,7 +71,7 @@ export const CopyButton = ({ text, className = '', ...props }: CopyButtonProps) 
 		>
 			<Icon
 				name={copied ? IconName.Check : IconName.Copy}
-				className={`h-4 w-4 ${copied ? 'text-[#76b900]' : ''}`}
+				className={`h-4 w-4 ${copied ? 'text-accent' : ''}`}
 			/>
 		</button>
 	);

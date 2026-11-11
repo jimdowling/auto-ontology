@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# A one-data-node MySQL NDB Cluster for the DAL tests: NDB refuses TEXT on
+# cascade children and caps row size and transaction size, which InnoDB does not.
+# Start: docker compose -f dev_tools/ndb/docker-compose.yml up -d --wait
+# Tests: MYSQL_HOST=127.0.0.1 MYSQL_PORT=33306 MYSQL_USER=root MYSQL_PASSWORD=ndbtest MYSQL_DB=ontology
+name: auto-ontology-ndb
+services:
+  mgmd:
+    image: mysql/mysql-cluster:8.0.32
+    command: ndb_mgmd --initial
+    # The image's healthcheck pings a mysqld, which mgmd and ndbd do not run.
+    healthcheck:
+      disable: true
+    volumes:
+      - ./config.ini:/etc/mysql-cluster.cnf:ro
+    networks:
+      ndb:
+        ipv4_address: 172.31.250.2
+  ndbd:
+    image: mysql/mysql-cluster:8.0.32
+    command: ndbd
+    healthcheck:
+      disable: true
+    volumes:
+      - ./my.cnf:/etc/my.cnf:ro
+    depends_on: [mgmd]
+    networks:
+      ndb:
+        ipv4_address: 172.31.250.3
+  mysqld:
+    image: mysql/mysql-cluster:8.0.32
+    command: mysqld
+    environment:
+      MYSQL_ROOT_PASSWORD: ndbtest
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_DATABASE: ontology
+    volumes:
+      - ./my.cnf:/etc/my.cnf:ro
+    depends_on: [ndbd]
+    ports:
+      - "33306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-pndbtest", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    networks:
+      ndb:
+        ipv4_address: 172.31.250.10
+networks:
+  ndb:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24

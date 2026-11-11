@@ -11,6 +11,7 @@ on:
     branches: [main]
     paths:
       - 'frontend/**'
+      - 'auto_ontology/server/static/**'
 
 defaults:
   run:
@@ -65,53 +66,12 @@ jobs:
       - name: Build
         run: pnpm build
 
-  build_image:
-    name: Build frontend image
-    runs-on: ubuntu-latest
-    # Override the workflow-level `working-directory: frontend`: this job's first
-    # `run:` step (Free disk space) executes before checkout, when `frontend/`
-    # does not exist yet. `uses:` actions ignore this anyway, so the
-    # build-push-action `context: ./frontend` still resolves from the repo root.
-    defaults:
-      run:
-        working-directory: .
-    # The `secrets` context is not allowed in `if:` expressions, so surface the
-    # NGC key as an env var and gate the nvcr.io login on that instead.
-    env:
-      NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
-    steps:
-      - name: Free disk space
+      # Hopsworks installs the package from git, so the UI it serves is the committed build.
+      - name: Committed UI build is current
         run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
-          df -h /
+          git status --porcelain -- ../auto_ontology/server/static
+          test -z "$(git status --porcelain -- ../auto_ontology/server/static)" \
+            || { echo "Run pnpm build in frontend/ and commit auto_ontology/server/static" >&2; exit 1; }
 
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to nvcr.io (for base image)
-        if: ${{ env.NGC_API_KEY != '' }}
-        uses: docker/login-action@v4
-        with:
-          registry: nvcr.io
-          username: '$oauthtoken'
-          password: ${{ env.NGC_API_KEY }}
-
-      - name: Build frontend image (no push)
-        uses: docker/build-push-action@v7
-        with:
-          context: ./frontend
-          file: frontend/Dockerfile
-          platforms: linux/amd64
-          push: false
-          load: false
-          build-args: |
-            PYTHON_API_URL=http://auto-ontology:3001
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
-          provenance: false
+      - name: Typecheck and test
+        run: pnpm typecheck && pnpm test

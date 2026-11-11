@@ -277,7 +277,12 @@ def _jks_to_pem(jks_path: str, password: str | None) -> str:
     module cannot read. ``pyjks`` parses it in-process, so no ``keytool`` (and no
     JDK) has to be present on the host.
     """
-    import jks
+    try:
+        import jks
+    except ImportError as exc:
+        raise ImportError(
+            "A JKS truststore needs pyjks: install auto-ontology-server[kyuubi]."
+        ) from exc
 
     store = jks.KeyStore.load(jks_path, password or "")
     chunks = []

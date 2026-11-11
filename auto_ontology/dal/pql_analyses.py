@@ -19,16 +19,16 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import upsert
 from auto_ontology.dal.session import store
 from auto_ontology.dal.sql_fragments import name_contains
 from auto_ontology.semantic.constants import LABEL_PQL_ANALYSIS
 
 if TYPE_CHECKING:
     from auto_ontology.utils.embedding import EmbedParams
-    from auto_ontology.vdb.postgres import PostgresVDB
+    from auto_ontology.vdb.feature_group import FeatureGroupVDB
 
 logger = logging.getLogger(__name__)
 
@@ -193,18 +193,15 @@ def upsert_pql_analysis_node(
     assigned rather than coalesced: it is a PUT, and the conflict checks above
     have already run.
     """
-    statement = insert(s.pql_analysis).values(
-        id=analysis_id, name=name, description=description, pql=pql
-    )
-    store().query_write(
-        statement.on_conflict_do_update(
-            index_elements=[s.pql_analysis.c.id],
-            set_={
-                "name": statement.excluded.name,
-                "description": statement.excluded.description,
-                "pql": statement.excluded.pql,
-            },
-        )
+    upsert(
+        s.pql_analysis,
+        {"id": analysis_id, "name": name, "description": description, "pql": pql},
+        key=("id",),
+        set_=lambda inserted: {
+            "name": inserted.name,
+            "description": inserted.description,
+            "pql": inserted.pql,
+        },
     )
 
 
@@ -246,7 +243,7 @@ def _pql_analysis_docs(analysis_id: str | None) -> list[dict[str, Any]]:
 
 def embed_pql_analyses(
     embed_params: "EmbedParams",
-    vdb: "PostgresVDB",
+    vdb: "FeatureGroupVDB",
     analysis_id: str | None = None,
     database_name: str | None = None,
 ) -> None:

@@ -76,9 +76,10 @@ def column_description_expr(column=s.catalog_column) -> ColumnElement:
     are needed — ``description`` for the first branch and ``id`` to correlate
     the subqueries — and reading the description back out of a second
     ``SELECT`` on ``catalog_column`` would correlate the table with itself,
-    turning the ``WHERE`` into a tautology that matches every row. Postgres
-    catches that as a cardinality violation rather than returning a wrong
-    answer, which is the good outcome; passing the alias avoids it entirely.
+    turning the ``WHERE`` into a tautology that matches every row. The database
+    reports that as a scalar subquery returning more than one row rather than
+    returning a wrong answer, which is the good outcome; passing the alias
+    avoids it entirely.
     """
     return func.coalesce(
         _non_blank(column.c.description),

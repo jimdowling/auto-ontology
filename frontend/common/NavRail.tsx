@@ -2,37 +2,38 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useState } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { Link, useLocation } from 'react-router';
 import { Icon, IconName } from '@/common/icons';
+import { Permission } from '@/enums/auth';
+import { useMe } from '@/hooks/useMe';
 
 type NavItem = {
 	icon: IconName;
 	href: string;
 	label: string;
 	adminOnly?: boolean;
+	permission?: Permission;
 };
 
 const navItems: NavItem[] = [
-	{ icon: IconName.ChatBubble, href: '/chat', label: 'Chat' },
+	{ icon: IconName.ChatBubble, href: '/chat', label: 'Chat', permission: Permission.ChatUse },
 	{ icon: IconName.Discovery, href: '/discovery', label: 'Discovery' },
 	{ icon: IconName.Terms, href: '/terms', label: 'Terms' },
 	{ icon: IconName.ChartBar, href: '/analysis', label: 'Analysis' },
 	{ icon: IconName.Exploration, href: '/exploration', label: 'Exploration' },
 	{ icon: IconName.Database, href: '/data', label: 'Data' },
 	{ icon: IconName.ChartLine, href: '/analytics', label: 'Analytics', adminOnly: true },
-	// Settings is admin-only and now also contains Users and Single Sign-On
-	// (see app/settings/*). Viewers don't see it.
 	{ icon: IconName.Settings, href: '/settings', label: 'Settings', adminOnly: true },
 ];
 
-export const NavRail = ({ isAdmin = false }: { isAdmin?: boolean }) => {
-	const pathname = usePathname();
+export const NavRail = () => {
+	const { pathname } = useLocation();
+	const { isAdmin, can } = useMe();
 	const [isExpanded, setIsExpanded] = useState(false);
-	const visibleItems = navItems.filter((item) => !item.adminOnly || isAdmin);
+	const visibleItems = navItems.filter(
+		(item) => (!item.adminOnly || isAdmin) && (item.permission == null || can(item.permission)),
+	);
 
 	return (
 		<nav className="relative h-full w-12 shrink-0 border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
@@ -54,13 +55,13 @@ export const NavRail = ({ isAdmin = false }: { isAdmin?: boolean }) => {
 						return (
 							<Link
 								key={item.href}
-								href={item.href}
+								to={item.href}
 								title={isExpanded ? undefined : item.label}
 								className={`flex h-9 shrink-0 items-center gap-3 rounded-lg transition-colors ${
 									isExpanded ? 'w-full px-2' : 'w-9 justify-center'
 								} ${
 									isActive
-										? 'bg-[#76b900]/15 text-[#76b900]'
+										? 'bg-accent/15 text-accent'
 										: 'text-body hover:bg-zinc-100 hover:text-heading dark:hover:bg-zinc-800 dark:hover:text-zinc-200'
 								}`}
 							>

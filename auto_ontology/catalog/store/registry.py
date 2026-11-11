@@ -29,10 +29,9 @@ keys are parent-scoped — ``public`` exists once per database, not once.
 
 **Which relationships are association tables and which are foreign key
 columns.** ``CONTAINS`` is the latter: it is the child's parent FK, so writing
-one is an ``UPDATE`` of the child rather than an ``INSERT``. This is where the
-``ON DELETE CASCADE`` chain that makes ``reset.py``'s delete a single statement
-is set up — and getting it wrong would silently orphan every table in the
-catalog.
+one is an ``UPDATE`` of the child rather than an ``INSERT``. That parent FK is
+what ``reset.py`` walks to find a database's rows, and getting it wrong would
+silently orphan every table in the catalog.
 
 Note on naming: "link" rather than "relation" for an association, because in
 relational vocabulary a *relation* is a table — the opposite of what is meant.
@@ -40,15 +39,20 @@ relational vocabulary a *relation* is a table — the opposite of what is meant.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
 
-from sqlalchemy import Table, func
+from sqlalchemy import Table
 
 from auto_ontology.catalog.constants import Edges, Labels
 from auto_ontology.dal import schema as s
 from auto_ontology.semantic.constants import LABEL_SQL_ATTRIBUTE
+
+
+def md5_hex(text: str) -> str:
+    """The value MySQL's ``md5()`` gives for *text* stored as utf8mb4."""
+    return hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -70,23 +74,17 @@ class EntitySpec:
     #: "unique by name within its parent", which is how ``Schema``, ``Table``
     #: and ``Column`` are actually unique.
     natural_key: tuple[str, ...] = field(default_factory=tuple)
-    #: ``ON CONFLICT`` target, when the unique index is on an *expression*
-    #: rather than the columns themselves. ``sql_query`` is unique on
-    #: ``md5(sql_full_query)``, because statement text can exceed the btree row
-    #: limit — so the conflict target has to name the same expression or
-    #: Postgres cannot match it to an index.
-    conflict_expression: object | None = None
-    #: Natural-key parts compared through a function instead of directly, for
-    #: the same reason as ``conflict_expression`` and it must agree with it: an
-    #: index on ``md5(sql_full_query)`` cannot serve ``sql_full_query = $1``.
-    #: Postgres falls back to a sequential scan, which turns statement ingest
-    #: quadratic -- every upsert reads the whole table, and query ingestion
-    #: fans that out across a thread pool.
-    key_expressions: Mapping[str, Callable[[Any], Any]] = field(default_factory=dict)
+    #: Natural-key parts that are unique through a stored md5 of the value
+    #: rather than the value itself, mapped to the generated column holding the
+    #: hash. ``sql_query`` is unique on ``sql_hash``, because statement text can
+    #: exceed what a unique key can hold; matching on the text instead would
+    #: scan the table on every statement upsert.
+    hashed_keys: Mapping[str, str] = field(default_factory=dict)
 
 
 def _cols(table: Table) -> frozenset[str]:
-    return frozenset(c.name for c in table.columns)
+    """Writable columns: a generated column such as ``sql_hash`` refuses values."""
+    return frozenset(c.name for c in table.columns if c.computed is None)
 
 
 ENTITIES: dict[str, EntitySpec] = {
@@ -125,8 +123,7 @@ ENTITIES: dict[str, EntitySpec] = {
         table=s.sql_query,
         columns=_cols(s.sql_query),
         natural_key=("sql_full_query",),
-        conflict_expression=func.md5(s.sql_query.c.sql_full_query),
-        key_expressions={"sql_full_query": func.md5},
+        hashed_keys={"sql_full_query": "sql_hash"},
     ),
     Labels.CUSTOM_ANALYSIS: EntitySpec(
         label=Labels.CUSTOM_ANALYSIS,
@@ -188,7 +185,7 @@ LINKS: dict[tuple[str, str, str], LinkSpec] = {
         frozenset({"join_columns"}),
     ),
     # Column-level JOIN/UNION, written by query ingestion. `refs` accumulates
-    # rather than overwrites -- see `_upsert_edge_row`.
+    # rather than overwrites -- see `queries._accumulate`.
     (Edges.JOIN, Labels.COLUMN, Labels.COLUMN): LinkSpec(
         Edges.JOIN,
         s.column__join,

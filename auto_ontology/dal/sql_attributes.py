@@ -22,13 +22,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import String, delete, func, literal, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import delete, func, literal, or_, select, update
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import upsert
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import column_description_expr
 from auto_ontology.dal.tags import TARGET_SQL_ATTRIBUTE, fetch_tags_map
+from auto_ontology.dal.types import utcnow
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.server.sql_utils import SqlParseError
 
@@ -464,10 +465,10 @@ def link_to_term(attr_id: str, term_id: str) -> None:
                 s.sql_attribute__term.c.term_id != term_id,
             )
         )
-        store().query_write(
-            insert(s.sql_attribute__term)
-            .values(attribute_id=attr_id, term_id=term_id)
-            .on_conflict_do_nothing()
+        upsert(
+            s.sql_attribute__term,
+            {"attribute_id": attr_id, "term_id": term_id},
+            key=("attribute_id", "term_id"),
         )
 
 
@@ -484,32 +485,32 @@ def update_sql_attribute(
     modified_by: str | None = None,
     touch: bool = False,
 ) -> None:
-    """Set properties on an existing attribute; omitted fields are untouched."""
+    """Set properties on an existing attribute; ``None`` leaves a field unchanged.
+
+    ``owner_id`` is written only with ``set_owner``, so ``None`` there clears
+    the owner. ``touch`` stamps ``modified`` and ``modified_by`` in the same
+    UPDATE. With nothing to set, no statement runs.
+    """
     values: dict[str, Any] = {
-        "name": func.coalesce(name, s.sql_attribute.c.name),
-        "description": func.coalesce(description, s.sql_attribute.c.description),
-        "expression": func.coalesce(expression, s.sql_attribute.c.expression),
-    }
-    # The rest is filled in below; ``touch`` is applied with them so one
-    # UPDATE both changes the field and records who saved it.
-    if touch:
-        values["modified"] = func.now()
-        values["modified_by"] = modified_by
-    store().query_write(
-        update(s.sql_attribute)
-        .where(s.sql_attribute.c.id == attr_id)
-        .values(
-            **values,
-            # Typed explicitly: with every argument None, Postgres cannot infer
-            # a type for the parameter inside coalesce and rejects the statement
-            # outright. `source` is the one that hits it first because the
-            # column is nullable with no default.
-            source=func.coalesce(literal(source, String), s.sql_attribute.c.source),
-            certified=func.coalesce(certified, s.sql_attribute.c.certified),
-            owner_id=(
-                literal(owner_id, String) if set_owner else s.sql_attribute.c.owner_id
-            ),
+        column: value
+        for column, value in (
+            ("name", name),
+            ("description", description),
+            ("expression", expression),
+            ("source", source),
+            ("certified", certified),
         )
+        if value is not None
+    }
+    if set_owner:
+        values["owner_id"] = owner_id
+    if touch:
+        values["modified"] = utcnow()
+        values["modified_by"] = modified_by
+    if not values:
+        return
+    store().query_write(
+        update(s.sql_attribute).where(s.sql_attribute.c.id == attr_id).values(**values)
     )
 
 

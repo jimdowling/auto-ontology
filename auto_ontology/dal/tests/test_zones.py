@@ -2,9 +2,9 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Zone CRUD on Postgres.
+"""Zone CRUD.
 
-Concentrated on the two things that do not survive the move unchanged:
+Concentrated on the two things that are less obvious than they look:
 
 * **polymorphic targets** — callers pass a flat list of ids without saying
   whether each is a database, schema or table, which a graph never needed to
@@ -28,6 +28,7 @@ pytest.importorskip("sqlalchemy")
 
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.types import new_id  # noqa: E402
 from auto_ontology.dal.zones import (  # noqa: E402
     create_zone,
     delete_zone,
@@ -40,12 +41,12 @@ from auto_ontology.dal.zones import (  # noqa: E402
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM zone LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.zone.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable: {exc}")
 
 
 @pytest.fixture
@@ -54,10 +55,10 @@ def catalog():
     prefix = f"z-{uuid.uuid4().hex[:8]}"
     ids: dict[str, str] = {"prefix": prefix}
 
-    def insert(table, **values):
-        return store().query_write(
-            table.insert().values(**values).returning(table.c.id)
-        )[0]["id"]
+    def insert(table, **values) -> str:
+        values["id"] = new_id()
+        store().query_write(table.insert().values(**values))
+        return values["id"]
 
     for n in (1, 2):
         db_id = insert(s.catalog_database, name=f"{prefix}-db{n}")
@@ -104,7 +105,8 @@ def test_a_zone_can_target_all_three_tiers_at_once(catalog) -> None:
 
 
 def test_each_target_lands_in_its_own_column(catalog) -> None:
-    """``CHECK (num_nonnulls(...) = 1)`` would reject a row filled in twice."""
+    """Exactly one target column per row. The table has no CHECK to enforce it,
+    so the DAL's writes are what keep it true."""
     zone = create_zone(
         name=_name(catalog),
         description=None,

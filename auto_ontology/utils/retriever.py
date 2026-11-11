@@ -11,7 +11,7 @@ from typing import Any
 
 from auto_ontology.utils.embedding import EmbedParams, embed_texts, get_embed_params
 from auto_ontology.vdb import get_data_vdb, get_semantic_vdb
-from auto_ontology.vdb.postgres import PostgresVDB
+from auto_ontology.vdb.feature_group import FeatureGroupVDB
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ _QUERY_TIMEOUT_S = 60.0
 
 
 class Retriever:
-    """Embed a query and run a k-NN search against one :class:`PostgresVDB`.
+    """Embed a query and run a k-NN search against one :class:`FeatureGroupVDB`.
 
     ``vdb_kwargs["vdb"]`` is part of the interface, not an implementation
     detail: :func:`~auto_ontology.retrieval.data_access.semantic_search.search_semantic_index`
@@ -32,12 +32,12 @@ class Retriever:
     the ``where`` filter.
     """
 
-    def __init__(self, vdb: PostgresVDB, embed_params: EmbedParams) -> None:
+    def __init__(self, vdb: FeatureGroupVDB, embed_params: EmbedParams) -> None:
         self.vdb_kwargs: dict[str, Any] = {"vdb": vdb}
         self.embed_params = embed_params
 
     @property
-    def vdb(self) -> PostgresVDB:
+    def vdb(self) -> FeatureGroupVDB:
         return self.vdb_kwargs["vdb"]
 
     def query(
@@ -101,18 +101,11 @@ def _close_retriever_vdb(retriever: Retriever | None) -> None:
     try:
         retriever.vdb.close()
     except Exception:
-        logger.exception("Failed to close PostgresVDB on retriever cleanup")
+        logger.exception("Failed to close FeatureGroupVDB on retriever cleanup")
 
 
 def close_retrievers() -> None:
-    """Dispose singleton retriever VDB pools so CLI/debug processes can exit.
-
-    ``PGEngine`` keeps a background asyncio loop and ThreadPoolExecutor workers,
-    so a process that never disposes them exits later than it should. Calling
-    this explicitly is the tidy path; ``PostgresVDB.close`` bounds the wait and
-    skips it outright once the loop thread is gone, so neither route can wedge
-    at shutdown the way it once did.
-    """
+    """Drop the singleton retrievers so the next use builds fresh ones."""
     global _data_retriever, _semantic_retriever
     _close_retriever_vdb(_data_retriever)
     _close_retriever_vdb(_semantic_retriever)

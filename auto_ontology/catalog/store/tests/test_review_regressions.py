@@ -16,24 +16,23 @@ import uuid
 
 import pytest
 
-pytest.importorskip("psycopg")
+pytest.importorskip("sqlalchemy")
 
 from sqlalchemy import select  # noqa: E402
-from sqlalchemy.dialects.postgresql import insert  # noqa: E402
 
 from auto_ontology.catalog.store import registry  # noqa: E402
-from auto_ontology.catalog.store import rows as R  # noqa: E402
 from auto_ontology.catalog.store.rows import resolve_id, upsert_row  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.ops import insert_returning  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM catalog_database LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.catalog_database.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"catalog schema not reachable: {exc}")
 
@@ -48,30 +47,55 @@ def db_name():
 
 
 def test_a_conflicting_upsert_does_not_rewrite_the_primary_key(db_name) -> None:
-    """The ``ON CONFLICT`` update set must never contain ``id``.
+    """The conflict's update set must never contain ``id``.
 
     It did. Two ingests racing on the same natural key re-keyed the existing
     row to the loser's UUID, so every id the winner was holding — already
     written into child rows and returned to callers — pointed at nothing.
+
+    The loser is a Table matched on a fresh id the store has never seen, so
+    ``resolve_id`` misses and the write goes to the insert, where it collides
+    with the winner's ``(schema_id, name)``.
     """
+    db = upsert_row("Database", {"name": db_name}, {"name": db_name})
+    schema = upsert_row("Schema", {"name": "s"}, {"name": "s"}, parent_id=db)
+    winner = upsert_row(
+        "Table", {"name": "orders"}, {"name": "orders"}, parent_id=schema
+    )
+    loser_id = str(uuid.uuid4())
+
+    returned = upsert_row(
+        "Table",
+        {"id": loser_id},
+        {"id": loser_id, "name": "orders", "table_type": "base table"},
+        parent_id=schema,
+    )
+
+    assert returned == winner
+    rows = store().query_read(
+        select(s.catalog_table.c.id, s.catalog_table.c.table_type).where(
+            s.catalog_table.c.schema_id == schema
+        )
+    )
+    assert rows == [{"id": winner, "table_type": "base table"}]
+
+
+def test_a_statement_is_matched_by_its_hash(db_name) -> None:
+    """``sql_query`` is unique on ``sql_hash``; a repeat must find the first row."""
+    statement = f"SELECT 3 -- {db_name}"
     first = upsert_row(
-        "Database", {"name": db_name}, {"id": str(uuid.uuid4()), "name": db_name}
+        "Sql", {"sql_full_query": statement}, {"sql_full_query": statement}
     )
-
-    spec = registry.entity_spec("Database")
-    values = registry.projected("Database", {"id": str(uuid.uuid4()), "name": db_name})
-    skip = set(spec.natural_key) | {"id"}
-    update = {k: v for k, v in values.items() if k not in skip}
-    statement = insert(spec.table).values(**values)
-    target = R._conflict_target(spec)
-    statement = (
-        statement.on_conflict_do_update(index_elements=target, set_=update)
-        if update
-        else statement.on_conflict_do_nothing(index_elements=target)
-    )
-    store().query_write(statement)
-
-    assert resolve_id("Database", {"name": db_name}) == first
+    try:
+        again = upsert_row(
+            "Sql",
+            {"sql_full_query": statement},
+            {"id": str(uuid.uuid4()), "sql_full_query": statement},
+        )
+        assert again == first
+        assert resolve_id("Sql", {"sql_full_query": statement}) == first
+    finally:
+        store().query_write(s.sql_query.delete().where(s.sql_query.c.id == first))
 
 
 def test_upsert_row_never_offers_id_for_update() -> None:
@@ -101,8 +125,8 @@ def test_a_join_link_records_its_reference(db_name) -> None:
     """``refs`` is the point of the table and was never written.
 
     ``sql_parse`` emitted ``join_refs`` while the link spec declared ``refs``,
-    so the payload was always empty, every write took
-    ``on_conflict_do_nothing``, and the column stayed ``{}`` forever.
+    so the payload was always empty, every write kept the existing row, and
+    the column stayed empty forever.
     """
     from auto_ontology.catalog.constants import Props
     from auto_ontology.catalog.model.node import CatalogNode
@@ -122,11 +146,7 @@ def test_a_join_link_records_its_reference(db_name) -> None:
 
 
 def test_repeated_joins_accumulate_and_deduplicate(db_name) -> None:
-    """The whole reason ``refs`` is an array rather than a column.
-
-    Also the first exercise of ``_dedupe``: while the payload was empty this
-    path never ran, and the expression it generated was invalid SQL.
-    """
+    """The whole reason ``refs`` is a list rather than a column."""
     from auto_ontology.catalog.constants import Props
     from auto_ontology.catalog.model.node import CatalogNode
     from auto_ontology.catalog.store.queries import add_query
@@ -150,7 +170,7 @@ def test_a_reset_takes_the_statements_with_it(db_name) -> None:
     """``sql_query`` has no foreign key into the catalog, so nothing cascades.
 
     Left behind, the rows are invisible but not inert: dedup matches on
-    ``md5(sql_full_query)``, so the next ingest merges into the stale row and
+    ``sql_hash``, so the next ingest merges into the stale row and
     ``total_counter`` accumulates across resets.
     """
     from auto_ontology.dal.reset import _delete_orphaned_statements
@@ -161,9 +181,7 @@ def test_a_reset_takes_the_statements_with_it(db_name) -> None:
         "Sql", {"sql_full_query": statement}, {"sql_full_query": statement}
     )
     store().query_write(
-        insert(s.sql_query__table)
-        .values(sql_query_id=sql_id, table_id=tid)
-        .on_conflict_do_nothing()
+        s.sql_query__table.insert().values(sql_query_id=sql_id, table_id=tid)
     )
 
     store().query_write(
@@ -192,15 +210,13 @@ def test_a_statement_owned_by_an_attribute_survives_the_sweep(db_name) -> None:
     sql_id = upsert_row(
         "Sql", {"sql_full_query": statement}, {"sql_full_query": statement}
     )
-    attr_id = store().query_write(
-        s.sql_attribute.insert()
-        .values(name=f"{db_name}-attr", expression=statement)
-        .returning(s.sql_attribute.c.id)
+    attr_id = insert_returning(
+        s.sql_attribute,
+        {"name": f"{db_name}-attr", "expression": statement},
+        [s.sql_attribute.c.id],
     )[0]["id"]
     store().query_write(
-        insert(s.sql_attribute__sql)
-        .values(attribute_id=attr_id, sql_query_id=sql_id)
-        .on_conflict_do_nothing()
+        s.sql_attribute__sql.insert().values(attribute_id=attr_id, sql_query_id=sql_id)
     )
     try:
         _delete_orphaned_statements()

@@ -2,18 +2,14 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Permissions a group's role expands to.
+"""Permissions each ontology role holds.
 
-Illumex asks Frontegg which permissions each of a group's roles grants, then
-returns that set on the group. There is no Frontegg here. A group carries one
-of the two roles an account already has, and this module is the expansion.
-
-The lists are generated into this package from ``frontend/auth/access.json``,
-which the Next.js auth layer imports directly, so a group's ``permissions``
-and an account's role describe one vocabulary. Better Auth's built-in
-``user`` and ``session`` statements are not in the file: those govern account
-administration, which stays on the account's own role and is not something a
-group grants.
+A Hopsworks project role maps to one ontology role
+(:data:`auto_ontology.hopsworks.identity.PROJECT_ROLES`): Data owners are
+``admin``, Data scientists ``editor``, Observers and feature-store-restricted
+members ``reader``. ``access.json`` lists each role's ``resource: [actions]``,
+the same vocabulary as upstream's public API permissions, so the route
+permissions generated from that spec apply unchanged.
 """
 
 from __future__ import annotations
@@ -22,10 +18,9 @@ from importlib import resources
 import json
 from typing import Any
 
-from auto_ontology.dal.schema import GROUP_ROLE_ADMIN, GROUP_ROLE_VIEWER
+ROLES = ("admin", "editor", "reader")
 
 _ACCESS_RESOURCE = resources.files(__package__).joinpath("access.json")
-_ROLES = (GROUP_ROLE_ADMIN, GROUP_ROLE_VIEWER)
 
 
 def _invalid(message: str) -> RuntimeError:
@@ -71,7 +66,7 @@ def _load() -> dict[str, list[str]]:
         raise _invalid(f"malformed JSON ({exc.msg})") from exc
 
     loaded: dict[str, list[str]] = {}
-    for role in _ROLES:
+    for role in ROLES:
         resources = _resources_for_role(raw, role)
         loaded[role] = [
             f"{resource}:{action}"
@@ -87,8 +82,6 @@ _BY_ROLE = _load()
 def permissions_for_role(role: str) -> list[str]:
     """``resource:action`` strings for *role*, or nothing for an unknown one.
 
-    An unknown role grants nothing. The column constraint already limits
-    stored roles to the two known ones; this is the read path's own refusal
-    to invent permissions for a value it does not recognise.
+    An unknown role grants nothing.
     """
     return list(_BY_ROLE.get(role, ()))

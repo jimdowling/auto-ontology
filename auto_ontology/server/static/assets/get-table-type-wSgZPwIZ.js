@@ -1,0 +1,1 @@
+import{q as e}from"./index-B4MjRHXA.js";var t=new Set(Object.values(e));function n(n){let r=n?.trim().toLowerCase();return r!=null&&t.has(r)?r:e.BASE_TABLE}export{n as t};

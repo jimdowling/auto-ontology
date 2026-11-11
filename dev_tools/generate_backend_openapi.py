@@ -2,13 +2,9 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Dump the FastAPI apps' OpenAPI specs to ``docs/openapi/``.
+"""Dump the app's OpenAPI spec to ``docs/openapi/backend.json``.
 
-These describe the *internal* surface: the Python services are ClusterIP-only
-and reachable solely through the Next.js proxy. They are committed so the
-frontend generator (``frontend/scripts/generate-openapi.ts``) can merge their
-request/response schemas into the public spec without a running server, and so
-CI can diff them for drift.
+Committed so CI can diff it for drift and so API changes show in review.
 
 Usage (from the repo root)::
 
@@ -27,15 +23,11 @@ OUTPUT_DIR = REPO_ROOT / "docs" / "openapi"
 
 
 def _specs() -> dict[str, dict[str, Any]]:
-    # Imported lazily: building the apps pulls in the retrieval stack, which is
+    # Imported lazily: building the app pulls in the retrieval stack, which is
     # slow and noisy at import time.
-    from auto_ontology.ingestion_service.__main__ import app as ingestion_app
     from auto_ontology.server.__main__ import create_app
 
-    return {
-        "backend.json": create_app().openapi(),
-        "ingestion.json": ingestion_app.openapi(),
-    }
+    return {"backend.json": create_app().openapi()}
 
 
 def main() -> int:

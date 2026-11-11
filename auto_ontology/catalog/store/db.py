@@ -13,12 +13,16 @@ a future fix would have to be made twice or drift.
 
 What *is* here is the set of primitives that diff calls, and they are where the
 schema shows through: deleting a table no longer needs to name its columns,
-because they cascade.
+because they cascade. Deletes go one table, or ``IN_QUERY_BATCH`` columns, per
+transaction, so dropping a large schema is not one transaction over RonDB's
+32768 changed rows.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import func, select, update
+from collections.abc import Iterable
+
+from sqlalchemy import func, literal, select, update
 
 from auto_ontology.catalog.constants import Labels
 
@@ -31,6 +35,7 @@ from auto_ontology.catalog.diff import (  # noqa: F401
 from auto_ontology.catalog.store.registry import entity_spec
 from auto_ontology.catalog.store.rows import upsert_row
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import chunks
 from auto_ontology.dal.pii import untag_attributes_of_columns_being_deleted
 from auto_ontology.dal.session import store, write_transaction
 
@@ -85,22 +90,6 @@ def _spec_for(label: str):
     return entity_spec(aliases.get(str(label).lower(), label))
 
 
-def _column_ids_of_schema(schema_node_id: str) -> list[str]:
-    return [
-        row["id"]
-        for row in store().query_read(
-            select(s.catalog_column.c.id)
-            .select_from(
-                s.catalog_column.join(
-                    s.catalog_table,
-                    s.catalog_table.c.id == s.catalog_column.c.table_id,
-                )
-            )
-            .where(s.catalog_table.c.schema_id == schema_node_id)
-        )
-    ]
-
-
 def _column_ids_of_table(table_id: str) -> list[str]:
     return [
         row["id"]
@@ -110,25 +99,32 @@ def _column_ids_of_table(table_id: str) -> list[str]:
     ]
 
 
-def delete_schema(schema_node_id):
-    """Delete a schema. Its tables and columns go with it, by cascade.
+def delete_schema(schema_node_id: str) -> None:
+    """Delete a schema, one table per transaction, then the schema row.
+
+    Each table goes as :func:`delete_table` deletes it, so a failure part-way
+    leaves every table either gone with its PII realigned or intact with its
+    labels; a re-ingest deletes the rest.
+    """
+    table_ids = store().query_read(
+        select(s.catalog_table.c.id).where(
+            s.catalog_table.c.schema_id == schema_node_id
+        )
+    )
+    for row in table_ids:
+        delete_table(row["id"])
+    store().query_write(
+        s.catalog_schema.delete().where(s.catalog_schema.c.id == schema_node_id)
+    )
+
+
+def delete_table(table_id: str) -> None:
+    """Delete a table. Its columns cascade.
 
     PII on attributes of those columns is realigned in the same transaction
     as the delete. A cleanup that committed while the delete rolled back
     would leave live columns without labels the next ingest will not put
     back; failing the whole unit keeps both or neither.
-    """
-    with write_transaction():
-        untag_attributes_of_columns_being_deleted(_column_ids_of_schema(schema_node_id))
-        store().query_write(
-            s.catalog_schema.delete().where(s.catalog_schema.c.id == schema_node_id)
-        )
-
-
-def delete_table(table_id):
-    """Delete a table. Its columns cascade.
-
-    Same atomic unit as :func:`delete_schema`: untag, then delete, or neither.
     """
     with write_transaction():
         untag_attributes_of_columns_being_deleted(_column_ids_of_table(table_id))
@@ -137,19 +133,18 @@ def delete_table(table_id):
         )
 
 
-def delete_columns_batch(column_ids):
+def delete_columns_batch(column_ids: Iterable[str]) -> None:
     """Delete catalog columns, realigning PII on their attributes first.
 
-    Same atomic unit as :func:`delete_schema`: untag, then delete, or neither.
+    Same atomic unit as :func:`delete_table` for each ``IN_QUERY_BATCH``
+    columns: untag, then delete, or neither.
     """
-    ids = list(column_ids)
-    if not ids:
-        return
-    with write_transaction():
-        untag_attributes_of_columns_being_deleted(ids)
-        store().query_write(
-            s.catalog_column.delete().where(s.catalog_column.c.id.in_(ids))
-        )
+    for batch in chunks(column_ids):
+        with write_transaction():
+            untag_attributes_of_columns_being_deleted(batch)
+            store().query_write(
+                s.catalog_column.delete().where(s.catalog_column.c.id.in_(batch))
+            )
 
 
 def add_schemas_edge_batch(edges, created):
@@ -187,7 +182,10 @@ def update_properties_in_graph_batch(items):
 
         values = dict(props)
         if description is not None:
-            values["description"] = func.coalesce(spec.table.c.description, description)
+            description_column = spec.table.c.description
+            values["description"] = func.coalesce(
+                description_column, literal(description, description_column.type)
+            )
 
         if not values:
             continue

@@ -1,6 +1,53 @@
 {
   "components": {
     "schemas": {
+      "AcronymCreate": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AcronymCreate",
+        "type": "object"
+      },
+      "AcronymUpdate": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "AcronymUpdate",
+        "type": "object"
+      },
       "Body_import_model_api_model_import_post": {
         "properties": {
           "file": {
@@ -896,28 +943,9 @@
         "title": "ColumnSummary",
         "type": "object"
       },
-      "ConnectionBody": {
+      "ConversationCreate": {
         "properties": {
-          "connection": {
-            "additionalProperties": true,
-            "title": "Connection",
-            "type": "object"
-          }
-        },
-        "required": [
-          "connection"
-        ],
-        "title": "ConnectionBody",
-        "type": "object"
-      },
-      "ConnectionTestBody": {
-        "properties": {
-          "connection": {
-            "additionalProperties": true,
-            "title": "Connection",
-            "type": "object"
-          },
-          "replacing": {
+          "title": {
             "anyOf": [
               {
                 "type": "string"
@@ -926,36 +954,23 @@
                 "type": "null"
               }
             ],
-            "title": "Replacing"
+            "title": "Title"
           }
         },
-        "required": [
-          "connection"
-        ],
-        "title": "ConnectionTestBody",
+        "title": "ConversationCreate",
         "type": "object"
       },
-      "ConnectionTestResponse": {
-        "additionalProperties": true,
-        "description": "``schemas`` is empty for connectors that cannot enumerate schemas.",
+      "ConversationUpdate": {
         "properties": {
-          "schemas": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Schemas",
-            "type": "array"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
+          "title": {
+            "title": "Title",
+            "type": "string"
           }
         },
         "required": [
-          "success",
-          "schemas"
+          "title"
         ],
-        "title": "ConnectionTestResponse",
+        "title": "ConversationUpdate",
         "type": "object"
       },
       "CustomAnalysis": {
@@ -1301,19 +1316,6 @@
         "title": "DataResponse[ExplorationRelatedNodes]",
         "type": "object"
       },
-      "DataResponse_Group_": {
-        "additionalProperties": true,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/Group"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "DataResponse[Group]",
-        "type": "object"
-      },
       "DataResponse_IdRef_": {
         "additionalProperties": true,
         "properties": {
@@ -1338,19 +1340,6 @@
           "data"
         ],
         "title": "DataResponse[PqlAnalysis]",
-        "type": "object"
-      },
-      "DataResponse_PublicConnection_": {
-        "additionalProperties": true,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/PublicConnection"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "DataResponse[PublicConnection]",
         "type": "object"
       },
       "DataResponse_Rule_": {
@@ -1444,19 +1433,6 @@
         "title": "DataResponse[SqlValidationResult]",
         "type": "object"
       },
-      "DataResponse_SsoFederationState_": {
-        "additionalProperties": true,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/SsoFederationState"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "DataResponse[SsoFederationState]",
-        "type": "object"
-      },
       "DataResponse_TableExplorationDetails_": {
         "additionalProperties": true,
         "properties": {
@@ -1520,19 +1496,6 @@
           "data"
         ],
         "title": "DataResponse[Term]",
-        "type": "object"
-      },
-      "DataResponse_Zone_": {
-        "additionalProperties": true,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/Zone"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "DataResponse[Zone]",
         "type": "object"
       },
       "DataResponse_dict_str__int__": {
@@ -2360,233 +2323,6 @@
         "title": "GraphLink",
         "type": "object"
       },
-      "Group": {
-        "additionalProperties": true,
-        "description": "A group, its members, its role, and the permissions that role grants.\n\n``role`` is the stored value. ``roles`` is that same role as a one-element\nlist, and ``permissions`` is ``resource:action`` strings expanded from it.\nMembership does not change an account's own role.",
-        "properties": {
-          "color": {
-            "title": "Color",
-            "type": "string"
-          },
-          "created": {
-            "format": "date-time",
-            "title": "Created",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "permissions": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Permissions",
-            "type": "array"
-          },
-          "role": {
-            "title": "Role",
-            "type": "string"
-          },
-          "roles": {
-            "items": {
-              "$ref": "#/components/schemas/GroupRole"
-            },
-            "title": "Roles",
-            "type": "array"
-          },
-          "users": {
-            "items": {
-              "$ref": "#/components/schemas/GroupUser"
-            },
-            "title": "Users",
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "description",
-          "color",
-          "role",
-          "roles",
-          "users",
-          "permissions",
-          "created"
-        ],
-        "title": "Group",
-        "type": "object"
-      },
-      "GroupCreate": {
-        "properties": {
-          "color": {
-            "title": "Color",
-            "type": "string"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "role": {
-            "title": "Role",
-            "type": "string"
-          },
-          "user_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "User Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "name",
-          "color",
-          "role"
-        ],
-        "title": "GroupCreate",
-        "type": "object"
-      },
-      "GroupRole": {
-        "additionalProperties": true,
-        "description": "One role on a group.\n\nA group carries a single role, ``admin`` or ``viewer``. ``id`` and\n``name`` are that same value: there is no separate role catalog.",
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name"
-        ],
-        "title": "GroupRole",
-        "type": "object"
-      },
-      "GroupUpdate": {
-        "properties": {
-          "color": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Color"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "role": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Role"
-          },
-          "user_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User Ids"
-          }
-        },
-        "title": "GroupUpdate",
-        "type": "object"
-      },
-      "GroupUser": {
-        "additionalProperties": true,
-        "description": "An account as a member of a group.\n\n``name`` and ``email`` are empty when the account has been deleted and\nthe membership remains. ``role`` is the account's own role, not the\ngroup's.",
-        "properties": {
-          "email": {
-            "title": "Email",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "role": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Role"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "email"
-        ],
-        "title": "GroupUser",
-        "type": "object"
-      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2681,28 +2417,6 @@
         "title": "ListResponse[GlobalSearchItem]",
         "type": "object"
       },
-      "ListResponse_Group_": {
-        "additionalProperties": true,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/Group"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": [
-          "data",
-          "count"
-        ],
-        "title": "ListResponse[Group]",
-        "type": "object"
-      },
       "ListResponse_Owner_": {
         "additionalProperties": true,
         "properties": {
@@ -2723,28 +2437,6 @@
           "count"
         ],
         "title": "ListResponse[Owner]",
-        "type": "object"
-      },
-      "ListResponse_PublicConnection_": {
-        "additionalProperties": true,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/PublicConnection"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": [
-          "data",
-          "count"
-        ],
-        "title": "ListResponse[PublicConnection]",
         "type": "object"
       },
       "ListResponse_SqlAttribute_": {
@@ -2813,26 +2505,50 @@
         "title": "ListResponse[TagChip]",
         "type": "object"
       },
-      "ListResponse_Zone_": {
-        "additionalProperties": true,
+      "MessageCreate": {
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
           },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/Zone"
-            },
-            "title": "Data",
-            "type": "array"
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "sql_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql Code"
+          },
+          "sql_response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql Response"
           }
         },
         "required": [
-          "data",
-          "count"
+          "role"
         ],
-        "title": "ListResponse[Zone]",
+        "title": "MessageCreate",
         "type": "object"
       },
       "ModelFormat": {
@@ -3315,31 +3031,15 @@
         "title": "PqlAnalysisCreate",
         "type": "object"
       },
-      "PublicConnection": {
-        "additionalProperties": true,
-        "description": "A UI-managed connection with its credentials stripped.\n\n``connection`` is absent from the delete response, which echoes only the\ndatabase name it tore down; the list and create reads carry the full\ncredential-free config.",
+      "PromptBody": {
         "properties": {
-          "connection": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Connection"
-          },
-          "database_name": {
-            "title": "Database Name",
+          "content": {
+            "default": "",
+            "title": "Content",
             "type": "string"
           }
         },
-        "required": [
-          "database_name"
-        ],
-        "title": "PublicConnection",
+        "title": "PromptBody",
         "type": "object"
       },
       "Rule": {
@@ -3735,6 +3435,46 @@
           "last_failure_at"
         ],
         "title": "SemanticStatusResponse",
+        "type": "object"
+      },
+      "SourceBody": {
+        "properties": {
+          "name": {
+            "description": "The project data source's name",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "schemas": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schemas"
+          },
+          "table_regex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Regex"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SourceBody",
         "type": "object"
       },
       "SqlAttribute": {
@@ -4571,39 +4311,6 @@
           "sql"
         ],
         "title": "SqlValidationResult",
-        "type": "object"
-      },
-      "SsoFederationBody": {
-        "properties": {
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "enabled"
-        ],
-        "title": "SsoFederationBody",
-        "type": "object"
-      },
-      "SsoFederationState": {
-        "additionalProperties": true,
-        "description": "The one flag ``PATCH /connections/{database_name}/sso-federation`` sets.\n\nThe route deliberately echoes just the flag rather than the connection, so\na caller never has to re-send credentials to toggle it.",
-        "properties": {
-          "database_name": {
-            "title": "Database Name",
-            "type": "string"
-          },
-          "sso_federation": {
-            "title": "Sso Federation",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "database_name",
-          "sso_federation"
-        ],
-        "title": "SsoFederationState",
         "type": "object"
       },
       "StatusResponse": {
@@ -5937,6 +5644,34 @@
         "title": "TermsPageResponse",
         "type": "object"
       },
+      "Timeout": {
+        "properties": {
+          "seconds": {
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seconds"
+        ],
+        "title": "Timeout",
+        "type": "object"
+      },
+      "Toggle": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "Toggle",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -5975,97 +5710,6 @@
           "type"
         ],
         "title": "ValidationError",
-        "type": "object"
-      },
-      "Zone": {
-        "additionalProperties": true,
-        "description": "A zone with its catalog data items.\n\n``items`` is absent on the list endpoint, a list of ``ZoneItem`` on the\ndetail/update endpoints, and a plain list of the ids that were linked on\ncreate.",
-        "properties": {
-          "color": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Color"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "items": {
-            "anyOf": [
-              {
-                "items": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/ZoneItem"
-                    },
-                    {
-                      "type": "string"
-                    }
-                  ]
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Items"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          }
-        },
-        "required": [
-          "id"
-        ],
-        "title": "Zone",
         "type": "object"
       },
       "ZoneChip": {
@@ -6115,151 +5759,6 @@
         ],
         "title": "ZoneChip",
         "type": "object"
-      },
-      "ZoneCreate": {
-        "properties": {
-          "color": {
-            "title": "Color",
-            "type": "string"
-          },
-          "created_by": {
-            "title": "Created By",
-            "type": "string"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "items": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "color",
-          "items",
-          "created_by"
-        ],
-        "title": "ZoneCreate",
-        "type": "object"
-      },
-      "ZoneItem": {
-        "additionalProperties": true,
-        "description": "A catalog node a zone grants access to (a database, schema or table).",
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          }
-        },
-        "required": [
-          "id"
-        ],
-        "title": "ZoneItem",
-        "type": "object"
-      },
-      "ZoneStatusUpdate": {
-        "properties": {
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "enabled"
-        ],
-        "title": "ZoneStatusUpdate",
-        "type": "object"
-      },
-      "ZoneUpdate": {
-        "properties": {
-          "color": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Color"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "items": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Items"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          }
-        },
-        "title": "ZoneUpdate",
-        "type": "object"
       }
     }
   },
@@ -6269,6 +5768,248 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/acronyms": {
+      "get": {
+        "description": "Every acronym, newest first; with ``name``, whether that acronym exists.",
+        "operationId": "list_acronyms_api_acronyms_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response List Acronyms Api Acronyms Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Acronyms",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "operationId": "create_acronym_api_acronyms_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcronymCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Acronym Api Acronyms Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Acronym",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/acronyms/{acronym_id}": {
+      "delete": {
+        "operationId": "delete_acronym_api_acronyms__acronym_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "acronym_id",
+            "required": true,
+            "schema": {
+              "title": "Acronym Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Acronym",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "operationId": "update_acronym_api_acronyms__acronym_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "acronym_id",
+            "required": true,
+            "schema": {
+              "title": "Acronym Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcronymUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Acronym Api Acronyms  Acronym Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Acronym",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/analytics": {
+      "get": {
+        "description": "Questions asked in the last 30 days, newest first, with who asked them.",
+        "operationId": "analytics_api_analytics_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Analytics Api Analytics Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analytics",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/chat/cancel": {
       "post": {
         "description": "Abort the in-flight run for ``conversation_id``, if any.\n\nBacks the chat UI's Stop button. Without this, stopping only detached\nthe browser while the agent kept running and holding the slot, so the\nvery next question in the same conversation was rejected with 409.\n\nKilling the worker makes ``PrewarmedWorker.events()`` return rather\nthan raise, so ``_pump`` appends no error event: the run's buffer ends\nwith whatever steps completed and the stream closes with ``[DONE]``.\nConsumers therefore see a run that stopped without an answer, and the\nconversation keeps its user turn with no assistant reply.",
@@ -6476,35 +6217,384 @@
         ]
       }
     },
-    "/api/connections": {
+    "/api/configurations/distinct-value-probing": {
       "get": {
-        "description": "List every configured database connection, credential-free.\n\nCredentials \u2014 passwords, private keys and the Kyuubi truststore password \u2014\nare stripped from each connection object, so the payload is safe to render\nin the UI. ``database_name`` doubles as the connection's identity in the\nother routes here.",
-        "operationId": "list_connections_api_connections_get",
+        "description": "Whether compilation may run DISTINCT probes on source columns; on unless switched off.",
+        "operationId": "get_distinct_value_probing_api_configurations_distinct_value_probing_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListResponse_PublicConnection_"
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Get Distinct Value Probing Api Configurations Distinct Value Probing Get",
+                  "type": "object"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "List Connections",
+        "summary": "Get Distinct Value Probing",
         "tags": [
-          "connections"
+          "settings"
         ]
       },
-      "post": {
-        "description": "Register a database connection and return it credential-free.\n\nThe connection is validated on the way in; anything the driver rejects comes\nback as 422 with the failure message rather than a 500. Call\n``POST /connections/test`` first to check credentials and list the schemas\navailable for the picker.",
-        "operationId": "create_connection_api_connections_post",
+      "put": {
+        "operationId": "put_distinct_value_probing_api_configurations_distinct_value_probing_put",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ConnectionBody"
+                "$ref": "#/components/schemas/Toggle"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Put Distinct Value Probing Api Configurations Distinct Value Probing Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Distinct Value Probing",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/configurations/pii-detection": {
+      "get": {
+        "description": "Whether ingest classifies columns as PII; off unless switched on.",
+        "operationId": "get_pii_detection_api_configurations_pii_detection_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Get Pii Detection Api Configurations Pii Detection Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Pii Detection",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "put_pii_detection_api_configurations_pii_detection_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Toggle"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Put Pii Detection Api Configurations Pii Detection Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Pii Detection",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/configurations/semantic-compilation": {
+      "get": {
+        "description": "Whether the scheduled compile job compiles; off until switched on.",
+        "operationId": "get_semantic_compilation_api_configurations_semantic_compilation_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Get Semantic Compilation Api Configurations Semantic Compilation Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Semantic Compilation",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "description": "Switch compilation on or off; switching it on starts a compile run now.",
+        "operationId": "put_semantic_compilation_api_configurations_semantic_compilation_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Toggle"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Put Semantic Compilation Api Configurations Semantic Compilation Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Semantic Compilation",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/configurations/sql-query-timeout": {
+      "get": {
+        "description": "Seconds one agent-issued SQL statement may run.",
+        "operationId": "get_sql_query_timeout_api_configurations_sql_query_timeout_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Get Sql Query Timeout Api Configurations Sql Query Timeout Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Sql Query Timeout",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "put_sql_query_timeout_api_configurations_sql_query_timeout_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Timeout"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Put Sql Query Timeout Api Configurations Sql Query Timeout Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Sql Query Timeout",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/configurations/visualization": {
+      "get": {
+        "description": "Whether charts are generated for chat answers; on unless switched off.",
+        "operationId": "get_visualization_api_configurations_visualization_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Get Visualization Api Configurations Visualization Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Visualization",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "put_visualization_api_configurations_visualization_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Toggle"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Put Visualization Api Configurations Visualization Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Visualization",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/conversations": {
+      "get": {
+        "operationId": "list_conversations_api_conversations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Conversations Api Conversations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Conversations",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "post": {
+        "operationId": "create_conversation_api_conversations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationCreate"
               }
             }
           },
@@ -6515,7 +6605,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DataResponse_PublicConnection_"
+                  "additionalProperties": true,
+                  "title": "Response Create Conversation Api Conversations Post",
+                  "type": "object"
                 }
               }
             },
@@ -6532,103 +6624,28 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Create Connection",
+        "summary": "Create Conversation",
         "tags": [
-          "connections"
+          "conversations"
         ]
       }
     },
-    "/api/connections/source": {
-      "get": {
-        "description": "Report whether connections are managed via the ``CONNECTION_STRINGS`` env.",
-        "operationId": "is_env_source_api_connections_source_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Response Is Env Source Api Connections Source Get",
-                  "type": "boolean"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Is Env Source",
-        "tags": [
-          "connections"
-        ]
-      }
-    },
-    "/api/connections/test": {
-      "post": {
-        "description": "Validate a connection and return its schemas (for the schema picker).\n\nSet ``replacing`` to the ``database_name`` of the connection an edit is\nabout to overwrite. Without it the test rejects the connection for already\nexisting, and blank credentials stay blank instead of being taken from the\nstored connection the way ``PUT /connections/{database_name}`` would.",
-        "operationId": "test_connection_api_connections_test_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConnectionTestBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectionTestResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Test Connection",
-        "tags": [
-          "connections"
-        ]
-      }
-    },
-    "/api/connections/{database_name}": {
+    "/api/conversations/{conversation_id}": {
       "delete": {
-        "description": "Remove a connection, echoing the database name it tore down.\n\n404 when no connection carries that ``database_name``. The connection\nrecord is removed synchronously, but deleting the data already ingested\nfrom it is handed to the ingestion service and is best-effort \u2014 a 200 means\nthe connection is gone, not that its graph is.",
-        "operationId": "delete_connection_api_connections__database_name__delete",
+        "operationId": "delete_conversation_api_conversations__conversation_id__delete",
         "parameters": [
           {
-            "description": "Catalog database name, which doubles as the connection's identity.",
             "in": "path",
-            "name": "database_name",
+            "name": "conversation_id",
             "required": true,
             "schema": {
-              "description": "Catalog database name, which doubles as the connection's identity.",
-              "title": "Database Name",
+              "title": "Conversation Id",
               "type": "string"
             }
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_PublicConnection_"
-                }
-              }
-            },
+          "204": {
             "description": "Successful Response"
           },
           "422": {
@@ -6642,43 +6659,32 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Delete Connection",
+        "summary": "Delete Conversation",
         "tags": [
-          "connections"
+          "conversations"
         ]
       },
-      "put": {
-        "description": "Rewrite a connection's settings and return it credential-free.\n\n``database`` and ``type`` are the connection's identity and cannot change \u2014\nsending different ones is a 422. Credentials left blank keep their stored\nvalue, since the UI is never given them to send back. Re-ingest is\ntriggered only when the ``schemas`` allowlist changed.\n\n404 when no connection carries that ``database_name``.",
-        "operationId": "update_connection_api_connections__database_name__put",
+      "get": {
+        "operationId": "get_conversation_api_conversations__conversation_id__get",
         "parameters": [
           {
-            "description": "Catalog database name, which doubles as the connection's identity.",
             "in": "path",
-            "name": "database_name",
+            "name": "conversation_id",
             "required": true,
             "schema": {
-              "description": "Catalog database name, which doubles as the connection's identity.",
-              "title": "Database Name",
+              "title": "Conversation Id",
               "type": "string"
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConnectionBody"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DataResponse_PublicConnection_"
+                  "additionalProperties": true,
+                  "title": "Response Get Conversation Api Conversations  Conversation Id  Get",
+                  "type": "object"
                 }
               }
             },
@@ -6695,25 +6701,74 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Update Connection",
+        "summary": "Get Conversation",
         "tags": [
-          "connections"
+          "conversations"
+        ]
+      },
+      "patch": {
+        "operationId": "rename_conversation_api_conversations__conversation_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rename Conversation Api Conversations  Conversation Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rename Conversation",
+        "tags": [
+          "conversations"
         ]
       }
     },
-    "/api/connections/{database_name}/sso-federation": {
-      "patch": {
-        "description": "Toggle whether chat runs this connection's SQL as the signed-in user.",
-        "operationId": "set_sso_federation_api_connections__database_name__sso_federation_patch",
+    "/api/conversations/{conversation_id}/messages": {
+      "post": {
+        "operationId": "add_message_api_conversations__conversation_id__messages_post",
         "parameters": [
           {
-            "description": "Catalog database name, which doubles as the connection's identity.",
             "in": "path",
-            "name": "database_name",
+            "name": "conversation_id",
             "required": true,
             "schema": {
-              "description": "Catalog database name, which doubles as the connection's identity.",
-              "title": "Database Name",
+              "title": "Conversation Id",
               "type": "string"
             }
           }
@@ -6722,18 +6777,20 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SsoFederationBody"
+                "$ref": "#/components/schemas/MessageCreate"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DataResponse_SsoFederationState_"
+                  "additionalProperties": true,
+                  "title": "Response Add Message Api Conversations  Conversation Id  Messages Post",
+                  "type": "object"
                 }
               }
             },
@@ -6750,9 +6807,9 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Set Sso Federation",
+        "summary": "Add Message",
         "tags": [
-          "connections"
+          "conversations"
         ]
       }
     },
@@ -7019,6 +7076,202 @@
         "tags": [
           "datasources",
           "connectors"
+        ]
+      }
+    },
+    "/api/custom-prompts": {
+      "get": {
+        "operationId": "list_prompts_api_custom_prompts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Prompts Api Custom Prompts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Prompts",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "operationId": "create_prompt_api_custom_prompts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Prompt Api Custom Prompts Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Prompt",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/custom-prompts/{prompt_id}": {
+      "delete": {
+        "operationId": "delete_prompt_api_custom_prompts__prompt_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Prompt",
+        "tags": [
+          "settings"
+        ]
+      },
+      "get": {
+        "operationId": "get_prompt_api_custom_prompts__prompt_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Prompt Api Custom Prompts  Prompt Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Prompt",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "operationId": "update_prompt_api_custom_prompts__prompt_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Prompt Api Custom Prompts  Prompt Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Prompt",
+        "tags": [
+          "settings"
         ]
       }
     },
@@ -7721,198 +7974,25 @@
         ]
       }
     },
-    "/api/groups": {
+    "/api/me": {
       "get": {
-        "description": "Return every group, ordered by name, with its members. Requires admin.",
-        "operationId": "list_groups_api_groups_get",
+        "description": "The verified caller: Hopsworks username, ontology role and its permissions.",
+        "operationId": "me_api_me_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListResponse_Group_"
+                  "additionalProperties": true,
+                  "title": "Response Me Api Me Get",
+                  "type": "object"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "List Groups",
-        "tags": [
-          "users"
-        ]
-      },
-      "post": {
-        "description": "Create a group and its members. Requires the admin role.\n\nThe caller is the gateway's identity header. A missing header is 401; a\ncaller who is not an admin is 403.\n\n409 when another group already holds the name, compared\ncase-insensitively on the trimmed value. 400 when a member id is not an\naccount, or when the name, color, or role is missing or invalid.",
-        "operationId": "create_group_api_groups_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_Group_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Group",
-        "tags": [
-          "users"
-        ]
-      }
-    },
-    "/api/groups/{group_id}": {
-      "delete": {
-        "description": "Delete one group. Its membership is deleted with it.\n\nRequires the admin role. 404 rather than 204 for an id that is not\nthere: the caller deleted from a list it has already read, so a missing\ngroup means that list is stale.",
-        "operationId": "delete_group_api_groups__group_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "group_id",
-            "required": true,
-            "schema": {
-              "title": "Group Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_IdRef_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Group",
-        "tags": [
-          "users"
-        ]
-      },
-      "get": {
-        "description": "Return one group. Requires admin.\n\n404 for an unknown id rather than an empty group: the caller asked for a\nrow it expects to exist.",
-        "operationId": "get_group_api_groups__group_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "group_id",
-            "required": true,
-            "schema": {
-              "title": "Group Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_Group_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Group",
-        "tags": [
-          "users"
-        ]
-      },
-      "patch": {
-        "description": "Update a group's fields and, when sent, replace its members.\n\nRequires the admin role, for the same reason create does.\n\nOmitting ``user_ids`` leaves membership alone. Sending a list replaces\nit, and an empty list clears it. A patch that names no field returns the\ngroup unchanged.\n\n404 for an unknown id, 409 for a name another group holds, 400 for an\ninvalid field or a member id that is not an account.",
-        "operationId": "update_group_api_groups__group_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "group_id",
-            "required": true,
-            "schema": {
-              "title": "Group Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_Group_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Group",
+        "summary": "Me",
         "tags": [
           "users"
         ]
@@ -8095,7 +8175,7 @@
     },
     "/api/owners": {
       "get": {
-        "description": "Return every account and every group that can be shown as an owner.\n\nEach row carries the permissions of its role, which is what a picker uses\nto offer only the people who may own that kind of object. A group's\n``member_ids`` names the caller when they belong to it, and nobody else.\nThe edit button only needs that. The full roster stays on the admin group\nlist.",
+        "description": "Every project member, with the permissions of their ontology role.\n\nA picker uses the permissions to offer only the members who may own that\nkind of object. Groups do not exist on Hopsworks, so every row is a user.",
         "operationId": "list_owners_api_owners_get",
         "responses": {
           "200": {
@@ -8340,7 +8420,7 @@
     },
     "/api/question-entity-coverage": {
       "post": {
-        "description": "Return ranked semantic candidates and a 0\u20131 entity coverage grade.\n\nExtracts entities from the question, retrieves semantic candidates, filters\nby vector distance, enriches from the catalog, and grades how many entities have\nat least one covering ColumnAttribute candidate.\n\nReturns 422 when the flow cannot produce a result for the question.",
+        "description": "Return ranked semantic candidates and a 0\u20131 entity coverage grade.\n\nExtracts entities from the question, retrieves semantic candidates, filters\nby vector distance, enriches from the catalog, and grades how many entities have\nat least one covering ColumnAttribute candidate.\n\nReturns 422 when the flow cannot produce a result for the question, and\n429 when the app is already serving its cap of agent runs.",
         "operationId": "entity_coverage_api_question_entity_coverage_post",
         "requestBody": {
           "content": {
@@ -8749,7 +8829,7 @@
     },
     "/api/semantic-compilation/reset": {
       "post": {
-        "description": "Ask the ingestion service to rebuild every database's semantic layer.\n\nThe service deletes the semantic nodes and embeddings and compiles them\nagain, so the layer is rebuilt without waiting for the next scheduled run.",
+        "description": "Start the reset job for every database's semantic layer.\n\nThe job deletes the semantic rows and vectors and compiles them again, so\nthe layer is rebuilt without waiting for the next scheduled run.",
         "operationId": "reset_api_semantic_compilation_reset_post",
         "responses": {
           "202": {
@@ -8771,7 +8851,7 @@
     },
     "/api/semantic-compilation/status": {
       "get": {
-        "description": "Report whether the semantic layer has been calculated (any Term exists),\nwhether the ingestion service is compiling it right now, when the last\npass completed successfully, and when it last failed.\n\n``running`` needs the live ingestion process, so it goes through the HTTP\nproxy and degrades to ``False`` if that's unreachable. ``last_success_at``\nand ``last_failure_at`` are read straight from the ``semantic_compilation_history``\ntable instead \u2014 a temporarily unreachable ingestion service has no bearing\non Postgres, so history stays visible even while it's down (see\n``auto_ontology/server/ingestion/proxy.py``).",
+        "description": "Report whether the semantic layer has been calculated (any Term exists),\nwhether a compile job is queued or running, when the last pass completed\nsuccessfully, and when it last failed.\n\n``running`` reads the compile job's executions and degrades to ``False``\nwhen Hopsworks cannot be asked; the timestamps come from the\n``semantic_compilation_history`` table.",
         "operationId": "semantic_status_api_semantic_compilation_status_get",
         "responses": {
           "200": {
@@ -8793,7 +8873,7 @@
     },
     "/api/semantic-compilation/trigger": {
       "post": {
-        "description": "Ask the ingestion service to run (and schedule) semantic compilation.",
+        "description": "Start a compile run now, unless one is already queued or running.",
         "operationId": "trigger_api_semantic_compilation_trigger_post",
         "responses": {
           "202": {
@@ -8810,6 +8890,111 @@
         "summary": "Trigger",
         "tags": [
           "semantic-compilation"
+        ]
+      }
+    },
+    "/api/sources": {
+      "get": {
+        "description": "Every source, with the catalog database name its tables are filed under.",
+        "operationId": "list_sources_api_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Sources Api Sources Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Sources",
+        "tags": [
+          "sources"
+        ]
+      },
+      "post": {
+        "description": "Add a data source, or change its filters, and start ingesting it.\n\nReturns 422 when the data source is unsupported, uses per-user credentials,\nor reads a database another source already reads, and 502 when it cannot\nbe reached.",
+        "operationId": "add_source_api_sources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Source Api Sources Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Source",
+        "tags": [
+          "sources"
+        ]
+      }
+    },
+    "/api/sources/{name}": {
+      "delete": {
+        "description": "Stop reading a data source and delete what was ingested from it.",
+        "operationId": "remove_source_api_sources__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Source",
+        "tags": [
+          "sources"
         ]
       }
     },
@@ -10047,301 +10232,6 @@
         "summary": "List Term Sql Attributes By Id",
         "tags": [
           "terms"
-        ]
-      }
-    },
-    "/api/zones": {
-      "get": {
-        "description": "Return every zone to the requesting user.",
-        "operationId": "list_zones_api_zones_get",
-        "parameters": [
-          {
-            "description": "Requesting user id",
-            "in": "query",
-            "name": "uid",
-            "required": true,
-            "schema": {
-              "description": "Requesting user id",
-              "title": "Uid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListResponse_Zone_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Zones",
-        "tags": [
-          "zones"
-        ]
-      },
-      "post": {
-        "description": "Create a zone and attach catalog items.  Requires admin role.",
-        "operationId": "create_zone_api_zones_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ZoneCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_Zone_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Zone",
-        "tags": [
-          "zones"
-        ]
-      }
-    },
-    "/api/zones/{zone_id}": {
-      "delete": {
-        "description": "Delete one zone by id.",
-        "operationId": "delete_zone_api_zones__zone_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "zone_id",
-            "required": true,
-            "schema": {
-              "title": "Zone Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_IdRef_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Zone",
-        "tags": [
-          "zones"
-        ]
-      },
-      "get": {
-        "description": "Return one zone with its catalog data items.",
-        "operationId": "get_zone_api_zones__zone_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "zone_id",
-            "required": true,
-            "schema": {
-              "title": "Zone Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Requesting user id",
-            "in": "query",
-            "name": "uid",
-            "required": true,
-            "schema": {
-              "description": "Requesting user id",
-              "title": "Uid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_Zone_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Zone",
-        "tags": [
-          "zones"
-        ]
-      },
-      "patch": {
-        "description": "Update zone fields and optionally replace catalog data items.",
-        "operationId": "update_zone_api_zones__zone_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "zone_id",
-            "required": true,
-            "schema": {
-              "title": "Zone Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ZoneUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_Zone_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Zone",
-        "tags": [
-          "zones"
-        ]
-      }
-    },
-    "/api/zones/{zone_id}/status": {
-      "patch": {
-        "description": "Enable or disable a zone.  Requires admin role.\n\nDisabling clears the zone's ``enabled`` flag\n(re-enabling reverses it), which immediately revokes the catalog access\nthe zone granted without deleting it.",
-        "operationId": "set_zone_status_api_zones__zone_id__status_patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "zone_id",
-            "required": true,
-            "schema": {
-              "title": "Zone Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Admin user id performing the request",
-            "in": "query",
-            "name": "admin_uid",
-            "required": true,
-            "schema": {
-              "description": "Admin user id performing the request",
-              "title": "Admin Uid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ZoneStatusUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_Zone_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Set Zone Status",
-        "tags": [
-          "zones"
         ]
       }
     }

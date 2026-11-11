@@ -2,14 +2,20 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""VDB initialization — data layer and semantic layer collections."""
+"""Vector collections: the data layer and the semantic layer.
 
-from auto_ontology.infra.postgres import get_postgres_connection_string
-from auto_ontology.vdb.postgres import PostgresVDB
+On Hopsworks each collection is an embedding feature group named in
+``ontology.yaml``. Setting ``AUTO_ONTOLOGY_VDB=memory`` swaps in an in-process
+store, for tests and local runs without a cluster.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Any
 
 DATA_VDB_COLLECTION: str = "data_objects_layer"
 SEMANTIC_VDB_COLLECTION: str = "semantic_layer"
-VDB_SCHEMA: str = "vdb"
 
 
 def get_vdb(
@@ -17,33 +23,46 @@ def get_vdb(
     database_name: str | None = None,
     collection_name: str = DATA_VDB_COLLECTION,
     reset: bool = False,
-) -> PostgresVDB:
-    """Build a PostgresVDB pointed at the local pgvector-enabled Postgres.
+) -> Any:
+    """The vector store for ``collection_name``.
 
-    When database_name is provided, the VDB will use it to reset old embeddings for the given database.
+    With ``database_name`` and ``reset``, that database's vectors are deleted
+    first, before an ingest rewrites them.
     """
-    connection_string = get_postgres_connection_string()
-    kwargs: dict = {
-        "connection_string": connection_string,
-        "collection_name": collection_name,
-        "schema_name": VDB_SCHEMA,
-    }
-    if database_name:
-        kwargs["database_name"] = database_name
-    return PostgresVDB(reset=reset, **kwargs)
+    if os.environ.get("AUTO_ONTOLOGY_VDB") == "memory":
+        from auto_ontology.vdb.memory import MemoryVDB
+
+        return MemoryVDB.collection(
+            collection_name, database_name=database_name, reset=reset
+        )
+
+    from auto_ontology.hopsworks.config import load
+    from auto_ontology.vdb.feature_group import FeatureGroupVDB
+
+    config = load()
+    feature_group = (
+        config.data_objects_fg
+        if collection_name == DATA_VDB_COLLECTION
+        else config.semantic_fg
+    )
+    return FeatureGroupVDB(
+        collection_name=collection_name,
+        feature_group=feature_group,
+        version=config.fg_version,
+        dimension=config.embedding.dimension,
+        feature_store=config.feature_store,
+        database_name=database_name,
+        reset=reset,
+    )
 
 
-def get_data_vdb(
-    *, database_name: str | None = None, reset: bool = False
-) -> PostgresVDB:
-    """Backward-compatible alias for :func:`get_vdb` (tabular / data layer)."""
+def get_data_vdb(*, database_name: str | None = None, reset: bool = False) -> Any:
+    """The data-layer collection (tables and columns)."""
     return get_vdb(database_name=database_name, reset=reset)
 
 
-def get_semantic_vdb(
-    *, database_name: str | None = None, reset: bool = False
-) -> PostgresVDB:
-    """Build a PostgresVDB for the semantic layer."""
+def get_semantic_vdb(*, database_name: str | None = None, reset: bool = False) -> Any:
+    """The semantic-layer collection (terms, attributes, analyses)."""
     return get_vdb(
         database_name=database_name,
         collection_name=SEMANTIC_VDB_COLLECTION,

@@ -2,130 +2,43 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# ---------------------------------------------------------------------------
-# Auto Ontology image build / publish helpers
-# ---------------------------------------------------------------------------
-# These targets wrap the `docker buildx build` invocations needed to build
-# the backend and frontend images and (optionally) push them to NVIDIA's NGC
-# container registry. See `helm/auto-ontology/README.md` for the full deploy story;
-# this file only covers building and publishing the images.
-#
-# Common flow (one-time):
-#
-#   docker login nvcr.io                       # or: make login NGC_TOKEN=...
-#   make build  REGISTRY=nvcr.io/<org>/<team>  # local builds (single arch)
-#   make publish REGISTRY=nvcr.io/<org>/<team> # multi-arch push
-#
-# Variables (override on the command line):
-#
-#   REGISTRY        Full nvcr.io path, e.g. nvcr.io/nvidian/sw-auto-ontology
-#                   (required for `publish*` targets)
-#   TAG             Image tag. Defaults to `git describe`.
-#   PYTHON_API_URL  Backend URL baked into the frontend's Next.js rewrites
-#                   at build time. Defaults to http://auto-ontology:3001
-#                   (matches the in-cluster service the helm chart creates).
-#   PLATFORMS       Comma-separated platforms for multi-arch publish.
-#                   Defaults to linux/amd64,linux/arm64.
-# ---------------------------------------------------------------------------
+# Hopsworks installs this package from git into a clone of the
+# python-feature-pipeline environment; these targets cover local development only.
 
-REGISTRY       ?=
-TAG            ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-PYTHON_API_URL ?= http://auto-ontology:3001
-PLATFORMS      ?= linux/amd64,linux/arm64
+NDB := docker compose -f dev_tools/ndb/docker-compose.yml
+PG := postgresql://auto_ontology:auto_ontology@127.0.0.1:55432
+TEST_ENV := MYSQL_HOST=127.0.0.1 MYSQL_PORT=33306 MYSQL_USER=root MYSQL_PASSWORD=ndbtest MYSQL_DB=ontology AUTO_ONTOLOGY_VDB=memory \
+	POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=55432 POSTGRES_USER=auto_ontology POSTGRES_PASSWORD=auto_ontology POSTGRES_DATABASE=auto_ontology \
+	CONNECTION_STRINGS=$(PG)/pagila,sqlite:///$(CURDIR)/dev_tools/fixtures/sql/chinook.sqlite
 
-BACKEND_IMAGE  := auto-ontology
-FRONTEND_IMAGE := auto-ontology-frontend
-
-# --tag prefix. Plain image name when REGISTRY is empty (local builds);
-# fully-qualified when REGISTRY is set (publish builds).
-ifeq ($(REGISTRY),)
-  BACKEND_REF  := $(BACKEND_IMAGE):$(TAG)
-  FRONTEND_REF := $(FRONTEND_IMAGE):$(TAG)
-else
-  BACKEND_REF  := $(REGISTRY)/$(BACKEND_IMAGE):$(TAG)
-  FRONTEND_REF := $(REGISTRY)/$(FRONTEND_IMAGE):$(TAG)
-endif
-
-.PHONY: help login builder build build build-frontend \
-        publish publish publish-frontend
+.DEFAULT_GOAL := help
 
 help:
-	@echo "Auto Ontology image targets:"
-	@echo "  make build               Build both images locally (host arch only)"
-	@echo "  make build       Build backend image locally"
-	@echo "  make build-frontend      Build frontend image locally"
-	@echo "  make publish             Build + push both images (multi-arch)"
-	@echo "  make publish     Build + push backend image"
-	@echo "  make publish-frontend    Build + push frontend image"
-	@echo "  make login NGC_TOKEN=... docker login nvcr.io via NGC API token"
-	@echo ""
-	@echo "Schema targets (backend owns the \`auto_ontology\` schema; Prisma owns \`public\`):"
-	@echo "  make migrate             Apply Alembic migrations (alembic upgrade head)"
-	@echo "  make migrate-check       Fail if the schema has drifted from the metadata"
-	@echo "  make migrate-revision m=\"...\"  Autogenerate a revision from auto_ontology/dal/schema.py"
-	@echo
-	@echo "Required for publish*: REGISTRY=nvcr.io/<org>/<team>"
-	@echo "Current REGISTRY=$(REGISTRY) TAG=$(TAG)"
+	@echo "make ndb-up     Start the local NDB cluster the DAL tests run on, and the pagila source"
+	@echo "make ndb-down   Stop both and delete their data"
+	@echo "make lint       Ruff check and format check"
+	@echo "make test       The whole Python suite against the local NDB cluster"
+	@echo "make openapi    Regenerate docs/openapi/backend.json"
 
-login:
-	@if [ -z "$(NGC_TOKEN)" ]; then \
-	  echo "Usage: make login NGC_TOKEN=<your NGC API token>"; \
-	  echo "Get a token at https://ngc.nvidia.com/setup/api-key"; \
-	  exit 2; \
-	fi
-	@echo "$(NGC_TOKEN)" | docker login nvcr.io --username '$$oauthtoken' --password-stdin
+ndb-up:
+	$(NDB) up -d --wait
+	docker run -d --name ao-pagila -e POSTGRES_USER=auto_ontology -e POSTGRES_PASSWORD=auto_ontology \
+		-e POSTGRES_DB=auto_ontology -p 55432:5432 postgres:17 || docker start ao-pagila
+	until docker exec ao-pagila pg_isready -U auto_ontology -d auto_ontology; do sleep 1; done
+	$(TEST_ENV) uv run python -m dev_tools.fixtures.seed_fixtures
 
-# Ensure a docker-container builder exists for multi-arch builds.
-builder:
-	@docker buildx inspect auto-ontology-builder >/dev/null 2>&1 \
-	  || docker buildx create --name auto-ontology-builder --driver docker-container --use
-	@docker buildx use auto-ontology-builder
+ndb-down:
+	$(NDB) down -v
+	docker rm -f ao-pagila
 
-build:
-	docker buildx build -t $(BACKEND_REF) --load .
+lint:
+	uv run ruff check auto_ontology dev_tools
+	uv run ruff format --check auto_ontology dev_tools
 
-build-frontend:
-	docker buildx build --build-arg PYTHON_API_URL=$(PYTHON_API_URL) \
-	    -t $(FRONTEND_REF) --load ./frontend
+test:
+	$(TEST_ENV) uv run pytest auto_ontology dev_tools -q
 
-build: build build-frontend
+openapi:
+	uv run python -m dev_tools.generate_backend_openapi
 
-publish: require-registry builder
-	docker buildx build --platform $(PLATFORMS) \
-	    -t $(BACKEND_REF) --push .
-
-publish-frontend: require-registry builder
-	docker buildx build --platform $(PLATFORMS) \
-	    --build-arg PYTHON_API_URL=$(PYTHON_API_URL) \
-	    -t $(FRONTEND_REF) --push ./frontend
-
-publish: publish publish-frontend
-
-# Internal: fail fast if REGISTRY is missing on a publish target.
-.PHONY: require-registry
-require-registry:
-	@if [ -z "$(REGISTRY)" ]; then \
-	  echo "ERROR: REGISTRY is required for publish targets."; \
-	  echo "       e.g. make publish REGISTRY=nvcr.io/nvidian/sw-auto-ontology"; \
-	  exit 2; \
-	fi
-
-# --- Schema migrations -------------------------------------------------
-# The backend owns the `auto_ontology` Postgres schema. Prisma owns `public` and migrates
-# separately (frontend/prisma/migrate.sh); the two are independent.
-
-migrate:
-	uv run alembic upgrade head
-
-# Fails when auto_ontology/dal/schema.py and the database disagree. Run this in CI:
-# a schema change committed without its migration is invisible until deploy.
-migrate-check:
-	uv run alembic check
-
-migrate-revision:
-	@test -n "$(m)" || (echo 'usage: make migrate-revision m="what changed"' >&2; exit 2)
-	uv run alembic revision --autogenerate -m "$(m)"
-
-.PHONY: migrate migrate-check migrate-revision
-
-
+.PHONY: help ndb-up ndb-down lint test openapi

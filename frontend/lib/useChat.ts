@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cancelChat, streamChat, watchChat } from '@/api/chat';
 import { conversationsApi, toConversation } from '@/api/conversations';
@@ -96,7 +94,7 @@ export const useChat = () => {
 		setLiveSql(sql);
 	}, []);
 
-	// Purely local UI state — the chat proxy route persists both the user's
+	// Purely local UI state — the chat completions endpoint persists both the user's
 	// and the assistant's turns to the conversation server-side (so history
 	// stays correct even if this component unmounts mid-stream), so there is
 	// no DB write to do here.

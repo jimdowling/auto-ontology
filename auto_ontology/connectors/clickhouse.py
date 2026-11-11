@@ -406,6 +406,9 @@ class ClickHouseDatabase(SQLDatabase):
         params: dict[str, str] = {
             "database": self._database_name,
             "default_format": "JSONCompact",
+            # 2, not 1: reads only, but per-request settings such as
+            # max_execution_time below may still be set.
+            "readonly": "2",
         }
         if cap_rows:
             # Applied server-side, so a runaway query is bounded by work done

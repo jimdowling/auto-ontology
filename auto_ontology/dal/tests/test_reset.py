@@ -18,7 +18,7 @@ otherwise be discovered by a user:
   database, so there is no scope to match it by -- and a scoped reset silently
   wiping every predictive analysis in the deployment would be worse.
 
-The pgvector side is stubbed. These tests are about which rows the store keeps,
+The vector side is stubbed. These tests are about which rows the store keeps,
 and a real embedding round trip would only add a way for them to fail for an
 unrelated reason.
 
@@ -39,10 +39,11 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import func, or_, select  # noqa: E402
 
 from auto_ontology.dal import reset as r  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.ops import insert_returning  # noqa: E402
 from auto_ontology.dal.session import store, write_transaction  # noqa: E402
 
 
@@ -68,12 +69,12 @@ def _rolled_back():
 
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
-    if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set")
+    if not os.environ.get("MYSQL_USER"):
+        pytest.skip("MYSQL_* not set")
     try:
-        store().query_read("SELECT 1 FROM term LIMIT 1")
+        store().query_read(f"SELECT 1 FROM {s.term.name} LIMIT 1")
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
+        pytest.skip(f"auto_ontology schema unavailable: {exc}")
 
 
 class _StubVdb:
@@ -99,9 +100,7 @@ def stub_vdbs(monkeypatch):
 
 
 def _add(table, **values) -> str:
-    return store().query_write(table.insert().values(**values).returning(table.c.id))[
-        0
-    ]["id"]
+    return insert_returning(table, values, [table.c.id])[0]["id"]
 
 
 def _link(table, **values) -> None:
@@ -179,7 +178,7 @@ def world():
 
 
 def test_deleting_a_database_takes_its_whole_catalog(world) -> None:
-    """One DELETE; schemas, tables and columns follow by cascade.
+    """Schemas, tables and columns go with the database row.
 
     This is what modelling CONTAINS as a parent FK bought — and it means a child
     table added later cannot be forgotten here.
@@ -193,6 +192,83 @@ def test_deleting_a_database_takes_its_whole_catalog(world) -> None:
     assert not _exists(s.catalog_schema, database.schema)
     assert not _exists(s.catalog_table, database.table)
     assert not _exists(s.catalog_column, database.column)
+
+
+def _deleted_without_cascades(monkeypatch) -> list[int]:
+    """Batch sizes of every delete, asserting each found its children gone."""
+    sizes: list[int] = []
+    real = r.delete_returning
+
+    def checked(table, where, returning):
+        if "id" in table.c:
+            ids = [
+                row["id"] for row in store().query_read(select(table.c.id).where(where))
+            ]
+            for child, columns in r._cascade_children(table):
+                left = store().query_read(
+                    select(func.count().label("n"))
+                    .select_from(child)
+                    .where(or_(*(column.in_(ids) for column in columns)))
+                )[0]["n"]
+                assert left == 0, f"{child.name} rows would cascade from {table.name}"
+        rows = real(table, where, returning)
+        sizes.append(len(rows))
+        return rows
+
+    monkeypatch.setattr(r, "delete_returning", checked)
+    return sizes
+
+
+def test_a_catalog_larger_than_a_batch_goes_bottom_up(world, monkeypatch) -> None:
+    """RonDB caps the rows one transaction changes, cascades included.
+
+    So every delete must find its rows' children already gone, and no delete
+    may exceed the batch. With a batch of two, three tables of three columns,
+    foreign keys and tags all take several rounds.
+    """
+    prefix, make = world
+    shop, warehouse = make("shop"), make("warehouse")
+    tag = _add(s.tag, name=f"{prefix}-pii")
+    columns = []
+    for t in range(3):
+        table = _add(s.catalog_table, schema_id=shop.schema, name=f"t{t}")
+        _link(s.tag_target, tag_id=tag, table_id=table)
+        for c in range(3):
+            columns.append(_add(s.catalog_column, table_id=table, name=f"c{c}"))
+            _link(s.tag_target, tag_id=tag, column_id=columns[-1])
+    for source, target in zip(columns, columns[1:]):
+        _link(s.column__foreign_key, source_column_id=source, target_column_id=target)
+    monkeypatch.setattr(r, "_BATCH", 2)
+    sizes = _deleted_without_cascades(monkeypatch)
+
+    try:
+        assert r._delete_data_rows(shop.name) == 1
+
+        assert max(sizes) <= 2
+        assert not _exists(s.catalog_database, shop.id)
+        for column in columns:
+            assert not _exists(s.catalog_column, column)
+        assert not store().query_read(
+            select(s.tag_target.c.id).where(s.tag_target.c.tag_id == tag)
+        )
+        assert _exists(s.catalog_column, warehouse.column)
+    finally:
+        store().query_write(s.tag.delete().where(s.tag.c.id == tag))
+
+
+def test_a_scoped_semantic_reset_larger_than_a_batch(world, monkeypatch) -> None:
+    prefix, make = world
+    shop, warehouse = make("shop"), make("warehouse")
+    own = [shop.term(f"own-{n}") for n in range(5)]
+    theirs = warehouse.term("theirs")
+    monkeypatch.setattr(r, "_BATCH", 2)
+    sizes = _deleted_without_cascades(monkeypatch)
+
+    r.delete_semantic_layer(shop.name)
+
+    assert max(sizes) <= 2
+    assert not any(_exists(s.term, term) for term in own)
+    assert _exists(s.term, theirs)
 
 
 def test_deleting_one_database_leaves_the_other_alone(world) -> None:

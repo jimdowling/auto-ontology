@@ -2,9 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { pageQuery, requests } from './requests';
+import { pageQuery, requests, type QueryParams } from './requests';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
-import type { Params } from '@/types/params';
 import type {
 	ApiPagedResponse,
 	ApiResponse,
@@ -60,7 +59,7 @@ export const datasources = {
 		const pending = tablesBySchemaMap.get(key);
 		if (pending != null) return pending;
 
-		const params: Params = {};
+		const params: QueryParams = {};
 		if (opts.databaseName != null && opts.databaseName !== '') {
 			params.database_name = opts.databaseName;
 		}

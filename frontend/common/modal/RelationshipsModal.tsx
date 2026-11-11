@@ -2,10 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, useState } from 'react';
-import NextLink from 'next/link';
+import { Link } from 'react-router';
 
 import { explorationApi } from '@/api/exploration';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
@@ -142,14 +140,14 @@ export const RelationshipsModal = ({
 					);
 				}
 				return (
-					<NextLink
-						href={href}
-						className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
+					<Link
+						to={href}
+						className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-accent dark:hover:bg-zinc-700"
 						aria-label={`Open ${row.name}`}
 						title={`Open ${row.name}`}
 					>
 						<Icon name={IconName.ExternalLink} className="h-3.5 w-3.5" />
-					</NextLink>
+					</Link>
 				);
 			},
 		},

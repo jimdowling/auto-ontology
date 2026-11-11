@@ -13,8 +13,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# The frontend and MCP images are built from their own directories, so each
-# carries a copy of the root notice files to put under /licenses/.
+# The frontend directory carries a copy of the root notice files, which its
+# build ships with the UI.
 NOTICE_FILES = (
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
@@ -22,7 +22,7 @@ NOTICE_FILES = (
     "OPEN_SOURCE_NOTICE",
     "OPEN_SOURCE_NOTICE.license",
 )
-IMAGE_CONTEXTS = ("frontend", "mcp")
+IMAGE_CONTEXTS = ("frontend",)
 
 # Files that cannot carry a comment header, are generated, or are third-party
 # data. A `<file>.license` sidecar also satisfies the check.
@@ -53,7 +53,7 @@ EXEMPT_NAMES = {
     ".python-version",
     "next-env.d.ts",
 }
-EXEMPT_PREFIXES = ("vendor/",)
+EXEMPT_PREFIXES = ("vendor/", "auto_ontology/server/static/")
 
 
 def _tracked_files() -> list[str]:

@@ -2,26 +2,26 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Read instance-wide settings from the frontend's ``configurations`` table.
+"""Read instance-wide settings from the ``configurations`` table.
 
-The frontend owns that key/value table through Prisma; the Python services read
-it directly with psycopg so they can gate behaviour without a frontend
-round-trip. Flag values are the strings ``"true"`` / ``"false"``; numeric
+Flag values are the strings ``"true"`` / ``"false"``; numeric
 settings are stored as decimal integer strings.
 
 Each flag carries its own default for the "row absent or unreadable" case, and
 the defaults genuinely differ: semantic compilation and PII detection are
 opt-in (absent means off), while column profiling is opt-out (absent means on,
 so existing instances keep profiling after an upgrade that adds the toggle).
+On Hopsworks a new system's ``ontology.yaml`` sets all three
+(:func:`seed_from_config`), compilation on unless it says otherwise.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-import psycopg
-
-from auto_ontology.infra.postgres import FRONTEND_SCHEMA, get_postgres_connection_string
+if TYPE_CHECKING:
+    from auto_ontology.hopsworks.config import OntologyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -47,20 +47,17 @@ MAX_SQL_QUERY_TIMEOUT_SECONDS = 3600
 
 def _read_configuration_row(key: str) -> tuple[object, ...] | None:
     """Return the ``(value,)`` row for *key*, or ``None`` if it is absent."""
-    with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT value FROM {FRONTEND_SCHEMA}.configurations WHERE key = %s",
-                (key,),
-            )
-            return cur.fetchone()
+    from auto_ontology.dal.settings import get_configuration
+
+    value = get_configuration(key)
+    return None if value is None else (value,)
 
 
 def read_configuration_flag(key: str, *, default: bool) -> bool:
     """Return the boolean value of *key*, or *default* when it cannot be read.
 
     Best-effort by design: any DB error (including the table not existing yet,
-    which is the case before the frontend's first migration) falls back to
+    which is the case before the app's first migration) falls back to
     *default* rather than raising, so a missing or unreachable config never
     crashes a service at startup.
     """
@@ -152,8 +149,7 @@ def get_sql_query_timeout_seconds() -> int:
 
     Read per statement, so a change on Settings > Agent Settings applies to the
     next query without a restart. Defaults to
-    :data:`DEFAULT_SQL_QUERY_TIMEOUT_SECONDS` when the frontend has never
-    written the setting, including deployments that run without it.
+    :data:`DEFAULT_SQL_QUERY_TIMEOUT_SECONDS` when nobody has set it.
     """
     return read_configuration_int(
         SQL_QUERY_TIMEOUT_SECONDS_KEY,
@@ -161,3 +157,21 @@ def get_sql_query_timeout_seconds() -> int:
         minimum=MIN_SQL_QUERY_TIMEOUT_SECONDS,
         maximum=MAX_SQL_QUERY_TIMEOUT_SECONDS,
     )
+
+
+def seed_from_config(config: OntologyConfig) -> list[str]:
+    """Store ``ontology.yaml``'s switches for every key Settings has never set;
+    returns the keys stored. After that the Settings page is the record."""
+    from auto_ontology.dal.settings import seed_configuration
+    from auto_ontology.ingestion_service.config import SEMANTIC_COMPILATION_ENABLED_KEY
+
+    switches = {
+        SEMANTIC_COMPILATION_ENABLED_KEY: config.semantic_compilation,
+        PII_DETECTION_ENABLED_KEY: config.pii_detection,
+        DISTINCT_VALUE_PROBING_ENABLED_KEY: config.distinct_value_probing,
+    }
+    return [
+        key
+        for key, enabled in switches.items()
+        if seed_configuration(key, "true" if enabled else "false")
+    ]

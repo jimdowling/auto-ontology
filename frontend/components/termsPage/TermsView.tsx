@@ -2,10 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Placeholders } from '@/assets/images/placeholders';
@@ -42,10 +40,11 @@ import {
 	syncTags,
 } from '@/lib/tags';
 import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
-import { canEditEntity, changedOwnerId, entityOwnerSection, findOwner } from '@/lib/owners';
+import { changedOwnerId, entityOwnerSection, findOwner } from '@/lib/owners';
 import { fetchOwnerDirectory, ownerQueries } from '@/lib/queries/owners';
 import { OwnerPermission } from '@/types/owners';
-import { useSession } from '@/auth/auth-client';
+import { Permission } from '@/enums/auth';
+import { useMe } from '@/hooks/useMe';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
 import { Toast } from '@/common/Toast';
@@ -234,29 +233,6 @@ const TermCard = ({
 						</span>
 					</div>
 				</div>
-
-				{/* Zones */}
-				<div>
-					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-							Zones
-						</span>
-					</div>
-					<div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
-						{term.zones.length > 0 ? (
-							term.zones.map((zone) => (
-								<Label
-									key={zone.id}
-									label={zone.name}
-									color={zone.color}
-									muted={!zone.enabled}
-								/>
-							))
-						) : (
-							<span className="text-sm text-secondary dark:text-zinc-400">-</span>
-						)}
-					</div>
-				</div>
 			</div>
 		</li>
 	);
@@ -286,19 +262,19 @@ const withCounts = (held: Map<string, number>, rows: TermCount[] | undefined) =>
 };
 
 const FIELD_INPUT_CLASSNAME =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-accent focus:ring-2 focus:ring-accent/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
 
 const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100';
 
 export const TermsView = () => {
-	const router = useRouter();
+	const navigate = useNavigate();
 	// The tag picker's options come from the shared cache rather than a read of
 	// this page's own, so opening a term after a column attribute doesn't ask
 	// for the vocabulary twice.
 	const queryClient = useQueryClient();
-	const { data: session } = useSession();
+	const { can } = useMe();
 	const { data: owners = [] } = useQuery(ownerQueries.all());
-	const searchParams = useSearchParams();
+	const [searchParams] = useSearchParams();
 	const focusId = searchParams.get('focus');
 	const sqlAttrId = searchParams.get('sqlAttr');
 	const colAttrId = searchParams.get('colAttr');
@@ -456,9 +432,9 @@ export const TermsView = () => {
 
 	const handleCardClick = useCallback(
 		(term: Term) => {
-			router.push(`/terms?focus=${encodeURIComponent(term.id)}`);
+			navigate(`/terms?focus=${encodeURIComponent(term.id)}`);
 		},
-		[router],
+		[navigate],
 	);
 
 	const handleSqlAttrCreated = useCallback((attribute: SqlAttribute) => {
@@ -556,7 +532,7 @@ export const TermsView = () => {
 		setSqlAttrsEpoch((prev) => prev + 1);
 		setDeletingSqlAttr(null);
 		if (focusId != null) {
-			router.push(`/terms?focus=${encodeURIComponent(focusId)}`);
+			navigate(`/terms?focus=${encodeURIComponent(focusId)}`);
 		}
 	};
 
@@ -975,16 +951,16 @@ export const TermsView = () => {
 		(sectionId: string, rowId: string) => {
 			if (focusId == null) return;
 			if (sectionId === 'sql_attributes') {
-				router.push(
+				navigate(
 					`/terms?focus=${encodeURIComponent(focusId)}&sqlAttr=${encodeURIComponent(rowId)}`,
 				);
 			} else if (sectionId === 'column_attributes') {
-				router.push(
+				navigate(
 					`/terms?focus=${encodeURIComponent(focusId)}&colAttr=${encodeURIComponent(rowId)}`,
 				);
 			}
 		},
-		[focusId, router],
+		[focusId, navigate],
 	);
 
 	const getColumnAttributeSinglePage = useCallback(
@@ -995,9 +971,6 @@ export const TermsView = () => {
 					header: { header: { title: 'Column Attribute Not Found' } },
 				};
 			}
-			// TODO: viewer zone-scoping handled in a separate PR — for now the
-			// client treats a viewer the same as an admin here (no zone fetch,
-			// userZoneIds = null → all zones accessible).
 			const [res, tagOptions, ownerDirectory, termRes] = await Promise.all([
 				termsApi.getColumnAttributes(focusId),
 				fetchTagOptions(queryClient),
@@ -1016,7 +989,6 @@ export const TermsView = () => {
 
 			const primaryColumn = attr.primary_column ?? null;
 			const referencedColumns = attr.referenced_columns ?? [];
-			const userZoneIds: string[] | null = null;
 			// Sample values live on the owning Column, so its declared SQL type is
 			// what decides whether they can be edited here.
 			const samplesEditable = sampleValuesEditable(attr.datatype);
@@ -1045,18 +1017,6 @@ export const TermsView = () => {
 						values: Array.isArray(attr.sample_values) ? attr.sample_values : [],
 						editable: samplesEditable,
 						hint: samplesEditable ? undefined : sampleValuesReadOnlyHint(attr.datatype),
-					},
-					{
-						type: ComposerSectionKind.ZONES_CHIPS,
-						id: 'zones',
-						title: 'Zones',
-						zones: (attr.zones ?? []).map((zone) => ({
-							id: zone.id,
-							name: zone.name,
-							color: zone.color,
-							enabled: zone.enabled,
-						})),
-						userZoneIds,
 					},
 					{
 						type: ComposerSectionKind.ENTITY_CHIPS,
@@ -1156,17 +1116,6 @@ export const TermsView = () => {
 						sql: attr.expression ?? '',
 						editable: true,
 					},
-					{
-						type: ComposerSectionKind.ZONES_CHIPS,
-						id: 'zones',
-						title: 'Zones',
-						zones: (attr.zones ?? []).map((z) => ({
-							id: z.id,
-							name: z.name,
-							color: z.color,
-							enabled: z.enabled,
-						})),
-					},
 				],
 				leftPanel: entitySidePanel({
 					owner: entityOwnerSection(
@@ -1251,17 +1200,6 @@ export const TermsView = () => {
 							id: table.id,
 							name: table.name,
 							focusId: [table.db_id, table.schema_id, table.id].join('|'),
-						})),
-					},
-					{
-						type: ComposerSectionKind.ZONES_CHIPS,
-						id: 'zones',
-						title: 'Zones',
-						zones: term.zones.map((z) => ({
-							id: z.id,
-							name: z.name,
-							color: z.color,
-							enabled: z.enabled,
 						})),
 					},
 					{
@@ -1359,20 +1297,8 @@ export const TermsView = () => {
 		}),
 	);
 
-	const actor = session?.user ? { id: session.user.id, role: session.user.role ?? null } : null;
-	const canEditCatalog = canEditEntity({
-		user: actor,
-		permission: { catalog: ['edit'] },
-	});
-	const canEditFocusedTerm = canEditEntity({
-		user: actor,
-		permission: { catalog: ['edit'] },
-		ownerId: focusedTerm?.owner_id,
-		owners,
-	});
-	// A SQL attribute shows the term's owner and does not grant edit through an
-	// owner of its own. The button and the certification dropdown follow the
-	// account role, the same way a column attribute does.
+	const canEditCatalog = can(Permission.CatalogEdit);
+	const canEditFocusedTerm = canEditCatalog;
 	const canEditFocusedSqlAttr = canEditCatalog;
 	const canEditFocusedColAttr = canEditCatalog;
 	const canCertifyAttributeRow = (): boolean => canEditCatalog;

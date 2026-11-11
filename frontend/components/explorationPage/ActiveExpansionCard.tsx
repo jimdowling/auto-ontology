@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { EmptyState } from '@/common/EmptyState';
@@ -46,13 +44,13 @@ const TYPE_LABEL: Record<ExpansionEntityKind, string> = {
 const TYPE_ICON_COLOR: Record<ExpansionEntityKind, string> = {
 	schema: 'text-[#8b7fd6]',
 	column: 'text-[#8a94a6]',
-	term: 'text-[#76b900]',
+	term: 'text-accent',
 	table: 'text-[#3b82b6]',
 	columnAttribute: 'text-[#c99a2e]',
 	sqlAttribute: 'text-[#c2577a]',
 	sql: 'text-[#4f83cc]',
 	customAnalysis: 'text-[#d17a3f]',
-	connection: 'text-[#76b900]',
+	connection: 'text-accent',
 };
 
 // The graph id `ExplorationView.tsx` gives most expansion node kinds is
@@ -102,7 +100,7 @@ const PATH_NODE_ICON: Record<string, IconName> = {
 };
 
 const PATH_NODE_ICON_COLOR: Record<string, string> = {
-	term: 'text-[#76b900]',
+	term: 'text-accent',
 	table: 'text-[#3b82b6]',
 	column: 'text-[#8a94a6]',
 	columnAttribute: 'text-[#c99a2e]',

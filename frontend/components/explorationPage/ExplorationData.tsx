@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
@@ -20,7 +18,6 @@ import type {
 	ExplorationGraph,
 	ExplorationLink,
 } from '@/types/exploration';
-import { ZonesRow } from '@/common/SinglePageComposer';
 
 /** Build the data-layer graph (Tables/Views + their relationships) from the server DTO. */
 export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph => {
@@ -38,7 +35,6 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 		columnsCount: table.columns_count,
 		sqlCount: table.sql_count ?? 0,
 		termsCount: table.terms_count ?? 0,
-		zones: table.zones ?? [],
 	}));
 
 	const tableIds = new Set(nodes.map((node) => node.id));
@@ -168,7 +164,6 @@ export const ActiveDataCard = ({
 					/>
 				</span>
 			</div>
-			<ZonesRow zones={node.zones} />
 		</div>
 	</section>
 );

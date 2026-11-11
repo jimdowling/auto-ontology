@@ -2,19 +2,17 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Load and cache SQLDatabase connectors from CONNECTION_STRINGS."""
+"""Load and cache SQLDatabase connectors for the ontology's sources."""
 
 from __future__ import annotations
 
 import logging
-import os
 import re
 from urllib.parse import urlparse
 
 from auto_ontology.catalog.table_filter import TableFilter, from_connection
 from auto_ontology.connectors.base import SQLDatabase
 
-from auto_ontology.connectors.connection_string_factory import build_connection_string
 from auto_ontology.connectors.clickhouse import ClickHouseDatabase
 from auto_ontology.connectors.databricks import DatabricksDatabase
 from auto_ontology.connectors.duckdb import DuckDBDatabase
@@ -186,73 +184,6 @@ def create_connector(
         raise
 
 
-def get_connectors_for_subject_token(
-    subject_token: str | None,
-) -> list[SQLDatabase]:
-    """Build connectors, authenticating federated connections as the caller.
-
-    Connections with "Authenticate as signed-in user" enabled get their stored
-    PAT replaced by a token exchanged from *subject_token* (the caller's SSO
-    JWT), so SQL runs under that user's Unity Catalog grants. Every other
-    connection is untouched and reuses the shared cache.
-
-    Fail-closed: a federated connection with no usable subject token raises
-    rather than falling back to the stored PAT — otherwise the query would
-    silently run with the PAT's broader privileges.
-
-    Raises:
-        DatabricksOAuthError: no subject token, or the exchange was rejected.
-    """
-    from auto_ontology.connectors.databricks_oauth import (
-        DatabricksOAuthError,
-        exchange_subject_token,
-        uses_sso_federation,
-    )
-    from auto_ontology.dal.connections import list_connections
-
-    try:
-        connections = list_connections()
-    except Exception:
-        logger.exception("Failed to load connections for per-user Databricks auth")
-        raise
-
-    federated = [conn for conn in connections if uses_sso_federation(conn)]
-    if not federated:
-        return get_connectors()
-
-    if not subject_token:
-        raise DatabricksOAuthError(
-            "This connection authenticates as the signed-in user, but the "
-            "request carried no SSO token"
-        )
-
-    loaded: list[SQLDatabase] = []
-    federated_names: set[str] = set()
-    for conn in federated:
-        access_token = exchange_subject_token(
-            str(conn.get("host") or ""), subject_token
-        )
-        connection_string = build_connection_string(
-            {**conn, "access_token_override": access_token}
-        )
-        connector = create_connector(
-            connection_string,
-            schemas=_schema_filter(conn),
-            table_filter=_table_filter(conn),
-        )
-        federated_names.add(connector.database_name)
-        loaded.append(connector)
-
-    # Non-federated connections keep their own credentials; reuse the shared
-    # cache rather than rebuilding them per request.
-    loaded.extend(
-        connector
-        for connector in get_connectors()
-        if connector.database_name not in federated_names
-    )
-    return loaded
-
-
 def get_connectors() -> list[SQLDatabase]:
     """Return cached connectors for all configured connections.
 
@@ -265,6 +196,7 @@ def get_connectors() -> list[SQLDatabase]:
     """
     global _connectors
     if _connectors is None:
+        from auto_ontology.connectors import hopsworks
         from auto_ontology.dal.connections import list_connections
 
         # Each spec is (connection_string, schema_allowlist, table_filter). The
@@ -272,37 +204,42 @@ def get_connectors() -> list[SQLDatabase]:
         # (Databricks, Snowflake, Kyuubi, and Trino); it is inert for retrieval,
         # which executes SQL rather than introspecting. The table filter is
         # likewise ingestion-only, but applies to every connector.
+        specs: list[tuple[str, list[str] | None, TableFilter]] = []
         try:
-            specs: list[tuple[str, list[str] | None, TableFilter]] = [
-                (
-                    build_connection_string(conn),
-                    _schema_filter(conn),
-                    _table_filter(conn),
-                )
-                for conn in list_connections()
-            ]
+            sources = list_connections()
         except Exception:
-            logger.exception("Failed to load connection strings from the catalog")
-            specs = []
+            logger.exception("Failed to load the ontology's sources from the store")
+            sources = []
+        for source in sources:
+            try:
+                specs.append(
+                    (
+                        hopsworks.connection_string(source),
+                        _schema_filter(source),
+                        _table_filter(hopsworks.table_filter_settings(source)),
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "Skipping source %r: its data source cannot be read",
+                    source.get("data_source"),
+                )
         if not specs:
-            # CONNECTION_STRINGS carries no connection dict, so an env-configured
-            # connection cannot express a table filter.
-            raw = os.environ.get("CONNECTION_STRINGS", "")
-            specs = [
-                (connection_string, None, TableFilter())
-                for connection_string in parse_connection_strings(raw)
-            ]
-        if not specs:
-            logger.warning(
-                "No connections configured. Add CONNECTION_STRINGS to your .env "
-                "or create a connection in Settings → Connections."
-            )
+            logger.warning("No sources configured. Add one in Settings > Sources.")
             return []
 
         loaded: list[SQLDatabase] = []
         seen_database_names: set[str] = set()
+        complete = True
         for cs, schemas, table_filter in specs:
-            connector = create_connector(cs, schemas=schemas, table_filter=table_filter)
+            # One unreachable source must not take chat down for the others.
+            try:
+                connector = create_connector(
+                    cs, schemas=schemas, table_filter=table_filter
+                )
+            except Exception:
+                complete = False
+                continue
             database_name = connector.database_name
             if database_name in seen_database_names:
                 logger.warning(
@@ -313,5 +250,8 @@ def get_connectors() -> list[SQLDatabase]:
                 )
             seen_database_names.add(database_name)
             loaded.append(connector)
+        if not complete:
+            # Not cached, so the next call retries the sources that failed.
+            return loaded
         _connectors = loaded
     return list(_connectors)

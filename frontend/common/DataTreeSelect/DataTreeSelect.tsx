@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, useRef, useState } from 'react';
 import type { Database, Schema, Table } from '@/types/datasources';
 import { DataModels, TableType } from '@/enums/datasources';
@@ -52,7 +50,7 @@ export type DataTreeSelectProps = {
 	/**
 	 * Whether clicking a row replaces the selection with that row alone.
 	 *
-	 * Off by default — Discovery and zones tick many nodes at once. On for a
+	 * Off by default — Discovery ticks many nodes at once. On for a
 	 * caller that can only draw one database at a time, where a checkbox
 	 * that added to the set would let two catalogs through.
 	 */
@@ -353,7 +351,7 @@ export const DataTreeSelect = ({
 					}
 				}}
 				onChange={onSelectionChange}
-				className={`h-4 w-4 cursor-pointer border-zinc-300 text-[#76b900] focus:ring-[#76b900]/40 dark:border-zinc-600 ${
+				className={`h-4 w-4 cursor-pointer border-zinc-300 text-accent focus:ring-accent/40 dark:border-zinc-600 ${
 					singleSelect ? '' : 'rounded'
 				}`}
 			/>

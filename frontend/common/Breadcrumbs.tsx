@@ -2,9 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
-import Link from 'next/link';
+import { Link } from 'react-router';
 import { Fragment } from 'react';
 import { Icon, IconName } from '@/common/icons';
 import { Text } from '@/common/Text';
@@ -42,7 +40,7 @@ export const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
 							</span>
 						) : (
 							<Link
-								href={item.href}
+								to={item.href}
 								className={`min-w-0 ${CRUMB_MAX_WIDTH} text-body transition-colors hover:text-heading dark:text-zinc-400 dark:hover:text-zinc-100`}
 							>
 								<Text text={item.label} />

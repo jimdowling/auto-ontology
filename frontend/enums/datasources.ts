@@ -31,7 +31,6 @@ export enum ComposerSectionKind {
 	INFO_GRID = 'infoGrid',
 	DATA_TABLE = 'dataTable',
 	LOADING_PANEL = 'loadingPanel',
-	ZONES_CHIPS = 'zonesChips',
 	RELATED_TERMS_CHIPS = 'relatedTermsChips',
 	ENTITY_CHIPS = 'entityChips',
 	/**
@@ -50,11 +49,4 @@ export enum ComposerColumnType {
 	TEXT = 'text',
 	TAGS = 'tags',
 	CERTIFICATION = 'certification',
-}
-
-export enum Usage {
-	HIGH = 'high',
-	MEDIUM = 'medium',
-	LOW = 'low',
-	UNUSED = 'unused',
 }

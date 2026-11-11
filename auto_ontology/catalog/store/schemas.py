@@ -14,15 +14,11 @@ error; it is the diff silently doing nothing.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from threading import Lock
 
 import pandas as pd
-from sqlalchemy import ARRAY, Text, and_, cast, column, delete, func, select, update
-from sqlalchemy import values as sa_values
-
-# The dialect insert, not sqlalchemy.insert: only this one has
-# on_conflict_do_update.
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import and_, case, delete, literal, select, update
 
 from auto_ontology.catalog.constants import Labels
 from auto_ontology.catalog.model.node import CatalogNode
@@ -31,6 +27,7 @@ from auto_ontology.catalog.normalize import normalize_columns, normalize_tables
 from auto_ontology.catalog.store.registry import entity_spec
 from auto_ontology.catalog.store.rows import upsert_row
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import chunks, upsert
 from auto_ontology.dal.session import store, write_transaction
 
 logger = logging.getLogger(__name__)
@@ -361,14 +358,17 @@ def merge_schema_edges(edges, from_label, to_label, pending: PendingRows):
         )
 
 
-def add_fks(fks_df, last_seen, database_name: str):
+def add_fks(
+    fks_df: pd.DataFrame | None, last_seen: datetime, database_name: str
+) -> None:
     """Record each foreign key, stamping *last_seen* so stale ones can be found.
 
-    One read to resolve every column id, then one insert for the whole set.
-    Per row it was two id lookups plus an autocommitted upsert -- three round
-    trips each, and each id lookup a four-table join. A warehouse schema has
-    thousands of foreign keys, so that was the ingest's cost, not a detail of
-    it.
+    One read to resolve every column id, then one upsert per
+    ``IN_QUERY_BATCH`` keys. Per row it was two id lookups plus an
+    autocommitted upsert -- three round trips each, and each id lookup a
+    four-table join. A warehouse schema has thousands of foreign keys, so that
+    was the ingest's cost, not a detail of it. A pair repeated in the source
+    data updates its row twice, which ``ON DUPLICATE KEY UPDATE`` allows.
     """
     if fks_df is None or fks_df.empty:
         return
@@ -376,7 +376,6 @@ def add_fks(fks_df, last_seen, database_name: str):
     ids = _column_ids_by_name(database_name)
 
     rows = []
-    seen = set()
     for row in fks_df.to_dict(orient="records"):
         source = ids.get((row["table_schema"], row["table_name"], row["column_name"]))
         target = ids.get(
@@ -390,13 +389,6 @@ def add_fks(fks_df, last_seen, database_name: str):
             # Nothing to link, so move on:
             # a foreign key onto a table outside the ingested set is normal.
             continue
-        # Postgres refuses to let one INSERT ... ON CONFLICT DO UPDATE touch the
-        # same row twice ("cannot affect row a second time"), so a pair repeated
-        # in the source data has to be collapsed here rather than left to the
-        # database. The row-at-a-time version simply upserted it twice.
-        if (source, target) in seen:
-            continue
-        seen.add((source, target))
         rows.append(
             {
                 "source_column_id": source,
@@ -405,16 +397,13 @@ def add_fks(fks_df, last_seen, database_name: str):
             }
         )
 
-    if not rows:
-        return
-
-    statement = insert(s.column__foreign_key).values(rows)
-    store().query_write(
-        statement.on_conflict_do_update(
-            index_elements=["source_column_id", "target_column_id"],
-            set_={"last_seen": statement.excluded.last_seen},
+    for batch in chunks(rows):
+        upsert(
+            s.column__foreign_key,
+            batch,
+            key=["source_column_id", "target_column_id"],
+            set_=lambda inserted: {"last_seen": inserted.last_seen},
         )
-    )
 
 
 def delete_old_fks(last_seen, database_name: str):
@@ -473,17 +462,13 @@ def reset_pks(database_name: str):
     )
 
 
-def add_pks(pks_df, database_name: str):
-    """Append each primary-key column name to its table's ``pk`` array.
+def add_pks(pks_df: pd.DataFrame | None, database_name: str) -> None:
+    """Set each named table's ``pk`` to its primary-key column names, in key order.
 
-    Appending rather than assigning
-    (``t.pk + [col.name]``) and a composite key arrives as several rows.
-    ``reset_pks`` runs first, so the array starts empty each ingest.
-
-    A composite key's parts are grouped in Python and appended as one array, so
-    a table is updated once however many columns its key has -- and one
-    ``UPDATE ... FROM (VALUES ...)`` covers every table. Previously each part
-    cost an id lookup plus its own autocommitted update.
+    A composite key arrives as several rows, grouped here so a table is written
+    once however many columns its key has, and one ``UPDATE`` covers
+    ``IN_QUERY_BATCH`` tables. Tables the frame does not name keep their
+    ``pk``; ``reset_pks`` runs first in an ingest, so those read NULL.
 
     The rows are put in key order by ``ordinal_position``, each column's place
     in its key, before they are grouped. Not every connector returns them in
@@ -511,32 +496,21 @@ def add_pks(pks_df, database_name: str):
             continue
         parts.setdefault(table_id, []).append(row["column_name"])
 
-    if not parts:
-        return
-
-    incoming = sa_values(
-        column("table_id", Text),
-        column("key_columns", ARRAY(Text)),
-        name="incoming",
-    ).data(list(parts.items()))
-
-    store().query_write(
-        update(s.catalog_table)
-        .where(s.catalog_table.c.id == incoming.c.table_id)
-        .values(
-            pk=func.coalesce(s.catalog_table.c.pk, cast([], ARRAY(Text)))
-            + incoming.c.key_columns
+    pk_type = s.catalog_table.c.pk.type
+    for batch in chunks(parts.items()):
+        store().query_write(
+            update(s.catalog_table)
+            .where(s.catalog_table.c.id.in_([table_id for table_id, _ in batch]))
+            .values(
+                pk=case(
+                    {
+                        table_id: literal(key_columns, pk_type)
+                        for table_id, key_columns in batch
+                    },
+                    value=s.catalog_table.c.id,
+                )
+            )
         )
-    )
-
-
-def _append_to_pk(column, value):
-    """Append to a possibly-null ``text[]``.
-
-    ``array_append(NULL, x)`` yields ``{x}`` in Postgres, but coalescing first
-    keeps the intent legible and survives anyone changing the column default.
-    """
-    return func.array_append(func.coalesce(column, cast([], ARRAY(Text))), value)
 
 
 def _table_ids_by_name(database_name: str) -> dict[tuple[str, str], str]:

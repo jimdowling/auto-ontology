@@ -45,7 +45,7 @@ export const isProtectedTag = (tag: Pick<TagChip, 'name'>): boolean =>
  *
  * Read through the query cache rather than straight from the API, which is
  * what stops every detail page open from re-reading the whole vocabulary: the
- * root layout has already started that read, and a copy still inside its
+ * app shell has already started that read, and a copy still inside its
  * `staleTime` is handed back without asking again.
  *
  * `fetchQuery` rather than `ensureQueryData`, which returns whatever is held

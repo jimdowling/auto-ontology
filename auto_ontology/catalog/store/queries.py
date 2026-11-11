@@ -27,10 +27,10 @@ permanent puzzle.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 
 import pandas as pd
-from sqlalchemy import Text, cast, distinct, func, literal, select, update
-from sqlalchemy.dialects.postgresql import ARRAY, insert
+from sqlalchemy import Table, and_, select, update
 
 from auto_ontology.catalog.constants import Edges, Props
 from auto_ontology.catalog.model.node import CatalogNode
@@ -43,6 +43,7 @@ from auto_ontology.catalog.query_stats import (  # noqa: F401
 from auto_ontology.catalog.store import registry
 from auto_ontology.catalog.store.rows import upsert_row
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import upsert
 from auto_ontology.dal.session import store, write_transaction
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ _EMPTY_SQLS_COLUMNS = [
 # becomes two upserted rows and one association row.
 
 
-#: Link properties that **accumulate** on conflict instead of overwriting.
+#: Link properties that **accumulate** on a repeated link instead of overwriting.
 #:
 #: Each statement joining two columns adds its own reference, so the link
 #: records *how often and where* the join was observed. Overwriting would
@@ -96,9 +97,8 @@ def _link_kind(properties: dict) -> str:
 def _reject_nested(properties: dict) -> None:
     """Reject nested property values.
 
-    These become scalar columns. Postgres would take nested JSON in a jsonb
-    column, but not here — failing with the offending key named beats the
-    insert's own message.
+    These become scalar columns or lists of scalars; failing with the offending
+    key named beats the insert's own message.
     """
     for key, value in properties.items():
         nested = isinstance(value, dict) or (
@@ -111,7 +111,7 @@ def _reject_nested(properties: dict) -> None:
             )
 
 
-def add_query(edges) -> None:
+def add_query(edges: Iterable[tuple[CatalogNode, CatalogNode, dict]]) -> None:
     """Write a parsed statement, the rows it references, and the links."""
     for source, target, properties in edges:
         _write_link(source, target, properties)
@@ -156,80 +156,65 @@ def _write_link(source: CatalogNode, target: CatalogNode, properties: dict) -> N
         if spec.is_parent_link:
             return
 
-        values = {spec.source_column: source_id, spec.target_column: target_id}
+        key = {spec.source_column: source_id, spec.target_column: target_id}
         payload = {k: v for k, v in properties.items() if k in spec.property_columns}
-        values.update(payload)
-
-        statement = insert(spec.table).values(**values)
-        conflict = [spec.source_column, spec.target_column]
-        if not payload:
-            statement = statement.on_conflict_do_nothing(index_elements=conflict)
-        else:
-            updates = {}
-            for key, value in payload.items():
-                column = spec.table.c[key]
-                if key in _ACCUMULATING:
-                    # Append, then de-duplicate: re-ingesting the same statement
-                    # must not grow the array without bound.
-                    updates[key] = _dedupe(column + getattr(statement.excluded, key))
-                else:
-                    updates[key] = getattr(statement.excluded, key)
-            statement = statement.on_conflict_do_update(
-                index_elements=conflict, set_=updates
-            )
-        store().query_write(statement)
+        accumulated = {
+            k: _distinct(v) for k, v in payload.items() if k in _ACCUMULATING
+        }
+        replaced = {k: v for k, v in payload.items() if k not in _ACCUMULATING}
+        upsert(
+            spec.table,
+            {**key, **replaced, **accumulated},
+            key=list(key),
+            set_=(
+                (lambda inserted: {k: inserted[k] for k in replaced})
+                if replaced
+                else None
+            ),
+        )
+        if accumulated:
+            _accumulate(spec.table, key, accumulated)
 
 
-def _dedupe(array):
-    """Distinct elements of a text[], order not preserved.
+def _distinct(values: list) -> list:
+    """*values* without repeats, first occurrence kept, so order survives."""
+    return list(dict.fromkeys(values))
+
+
+def _accumulate(table: Table, key: dict[str, str], additions: dict[str, list]) -> None:
+    """Append each list in *additions* to the stored one, skipping values it holds.
 
     The graph did not de-duplicate and would append the same reference on every
     re-ingest of the same statement; that is a leak rather than a behaviour
-    worth reproducing, and the readers treat the array as a set.
+    worth reproducing, and the readers treat the list as a set.
 
-    ``column_valued`` is what makes this legal: ``unnest`` is a set-returning
-    function and has to sit in ``FROM``, not in the select list. Calling it
-    inline instead makes SQLAlchemy infer the FROM from the array expression
-    and emit ``FROM column__union, column__union AS excluded``, which Postgres
-    rejects.
-
-    The ``coalesce`` guards a case that is unreachable today but cheap to hold
-    shut. ``array_agg`` over *zero* rows returns ``NULL``, not ``'{}'``, and
-    ``refs`` is ``NOT NULL``, so an empty accumulated array would abort the
-    ingest on the *second* pass over a link -- the first inserts, only the
-    second reaches ON CONFLICT:
-
-        null value in column "refs" of relation "column__join"
-        violates not-null constraint
-
-    Nothing produces an empty one now: both writers are in ``sql_parse`` and
-    each emits exactly one ``"<sql id>|<condition>"``. But that is a property
-    of a caller two modules away, it is not checked anywhere, and the cost of
-    not relying on it is one ``coalesce``.
-
-    Only the aggregate needs guarding. ``refs`` is ``NOT NULL`` on both tables
-    that have it, so the concatenation's operands cannot be ``NULL`` and
-    ``NULL || anything`` never arises.
+    The row must exist. ``FOR UPDATE`` holds its lock to the end of the
+    caller's transaction, so two threads appending to one link cannot drop
+    each other's references.
     """
-    return select(
-        func.coalesce(
-            func.array_agg(distinct(func.unnest(array).column_valued("ref"))),
-            cast(literal([]), ARRAY(Text)),
-        )
-    ).scalar_subquery()
+    match = and_(*(table.c[column] == value for column, value in key.items()))
+    stored = store().query_read(
+        select(*(table.c[column] for column in additions))
+        .where(match)
+        .with_for_update()
+    )[0]
+    changed = {}
+    for column, values in additions.items():
+        merged = _distinct([*(stored[column] or []), *values])
+        if merged != stored[column]:
+            changed[column] = merged
+    if changed:
+        store().query_write(table.update().where(match).values(**changed))
 
 
-def get_sql_by_full_query(sql_full_query: str):
+def get_sql_by_full_query(sql_full_query: str) -> str | None:
     """The statement's id, or None.
 
-    Matched through ``md5`` on both sides so the ``uq_sql_query_text_md5``
-    expression index applies; comparing the column directly is a sequential
-    scan. See ``registry.EntitySpec.key_expressions``.
+    Matched on ``sql_hash``, the unique key; the text column has no index.
     """
     rows = store().query_read(
         select(s.sql_query.c.id).where(
-            func.md5(s.sql_query.c.sql_full_query)
-            == func.md5(literal(sql_full_query, Text))
+            s.sql_query.c.sql_hash == registry.md5_hex(sql_full_query)
         )
     )
     return rows[0]["id"] if rows else None
@@ -239,11 +224,13 @@ def update_counters_and_timestamps_for_query_and_affected_data(
     identical_sql_id: str,
     sql_node: CatalogNode,
     update_data_last_query_timestamp: bool = True,
-):
+) -> None:
     """Add this sighting's count to the stored statement, and stamp the time.
 
     The per-month counters ``get_sql_counters`` also returns are ignored — see
-    the module docstring.
+    the module docstring. *update_data_last_query_timestamp* is accepted for
+    callers and has no effect: only statements carry a last-query timestamp;
+    the catalog tier has no column for one, and nothing reads it there.
     """
     latest_timestamp = sql_node.get_properties()["last_query_timestamp"]
     total_counter, _unreadable_month_counters = get_sql_counters(sql_node)
@@ -256,31 +243,6 @@ def update_counters_and_timestamps_for_query_and_affected_data(
             total_counter=s.sql_query.c.total_counter + total_counter,
         )
     )
-
-    if not update_data_last_query_timestamp:
-        return
-
-    # A statement references both tables and columns, through two association
-    # tables -- so two updates.
-    for association, target, key in (
-        (s.sql_query__table, s.catalog_table, "table_id"),
-        (s.sql_query__column, s.catalog_column, "column_id"),
-    ):
-        if "last_query_timestamp" not in target.c:
-            # Only statements carry a last-query timestamp; the catalog tier
-            # has no column for one, and nothing reads it there.
-            continue
-        store().query_write(
-            update(target)
-            .where(
-                target.c.id.in_(
-                    select(association.c[key]).where(
-                        association.c.sql_query_id == identical_sql_id
-                    )
-                )
-            )
-            .values(last_query_timestamp=latest_timestamp)
-        )
 
 
 def load_sqls_to_tables() -> pd.DataFrame:

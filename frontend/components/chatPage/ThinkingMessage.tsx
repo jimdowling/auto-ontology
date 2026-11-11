@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import type { GraphStep } from '@/types/chat';
 import { Icon, IconName } from '@/common/icons';
 import { SqlBlock } from '@/common/SqlBlock';
@@ -20,7 +18,7 @@ type ThinkingMessageProps = {
 
 const Dot = ({ delay }: { delay: string }) => (
 	<span
-		className="inline-block h-1.5 w-1.5 rounded-full bg-[#76b900]"
+		className="inline-block h-1.5 w-1.5 rounded-full bg-accent"
 		style={{
 			animation: 'thinking-bounce 1.2s linear infinite',
 			animationDelay: delay,
@@ -43,11 +41,11 @@ export const ThinkingMessage = ({ steps, liveSql }: ThinkingMessageProps) => {
 
 			<div className="w-full max-w-[80%] rounded-2xl bg-zinc-100 px-4 py-3 dark:bg-zinc-800">
 				<div className="mb-2 flex items-center gap-2">
-					<div className="flex h-6 w-6 items-center justify-center rounded-md bg-[#76b900]/15">
-						<Icon name={IconName.NvidiaLogo} className="h-4 w-4 text-[#76b900]" />
+					<div className="flex h-6 w-6 items-center justify-center rounded-md bg-accent/15">
+						<Icon name={IconName.Logo} className="h-4 w-4 text-accent" />
 					</div>
 					<span className="text-xs font-semibold text-body dark:text-zinc-200">
-						Auto Ontology Agent
+						Ontology Agent
 					</span>
 				</div>
 
@@ -60,7 +58,7 @@ export const ThinkingMessage = ({ steps, liveSql }: ThinkingMessageProps) => {
 							>
 								<Icon
 									name={IconName.Check}
-									className="mt-0.5 h-3 w-3 shrink-0 text-[#76b900]"
+									className="mt-0.5 h-3 w-3 shrink-0 text-accent"
 								/>
 								<span>
 									<span>{step.label}</span>

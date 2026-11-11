@@ -1,0 +1,283 @@
+{
+  "DELETE /api/acronyms/{}": [
+    "acronym:delete"
+  ],
+  "DELETE /api/conversations/{}": [
+    "conversation:delete"
+  ],
+  "DELETE /api/custom-analyses/{}": [
+    "analysis:manage"
+  ],
+  "DELETE /api/custom-prompts/{}": [
+    "prompt:delete"
+  ],
+  "DELETE /api/pql-analyses/{}": [
+    "analysis:manage"
+  ],
+  "DELETE /api/rules/{}": [
+    "tag:manage"
+  ],
+  "DELETE /api/sources/{}": [
+    "connection:manage"
+  ],
+  "DELETE /api/sql-attributes/{}": [
+    "catalog:edit"
+  ],
+  "DELETE /api/tags/{}": [
+    "tag:manage"
+  ],
+  "DELETE /api/tags/{}/targets/{}/{}": [
+    "catalog:read"
+  ],
+  "GET /api/acronyms": [
+    "acronym:read"
+  ],
+  "GET /api/analytics": [
+    "analytics:read"
+  ],
+  "GET /api/chat/watch": [
+    "conversation:read"
+  ],
+  "GET /api/columns/{}": [
+    "catalog:read"
+  ],
+  "GET /api/configurations/distinct-value-probing": [
+    "semanticCompilation:read"
+  ],
+  "GET /api/configurations/pii-detection": [
+    "pii:read"
+  ],
+  "GET /api/configurations/semantic-compilation": [
+    "semanticCompilation:read"
+  ],
+  "GET /api/configurations/sql-query-timeout": [
+    "visualization:read"
+  ],
+  "GET /api/configurations/visualization": [
+    "visualization:read"
+  ],
+  "GET /api/conversations": [
+    "conversation:read"
+  ],
+  "GET /api/conversations/{}": [
+    "conversation:read"
+  ],
+  "GET /api/custom-analyses": [
+    "analysis:read"
+  ],
+  "GET /api/custom-prompts": [
+    "prompt:read"
+  ],
+  "GET /api/custom-prompts/{}": [
+    "prompt:read"
+  ],
+  "GET /api/datasources/dbs": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/column-attributes/{}/details": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/columns/{}/details": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/edges": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/graph": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/nodes/{}/relationships": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/semantic-graph": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/sql-attributes/{}/details": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/sql/{}/details": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/tables/zones": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/tables/{}/details": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/terms/{}/details": [
+    "catalog:read"
+  ],
+  "GET /api/exploration/terms/{}/path/{}": [
+    "catalog:read"
+  ],
+  "GET /api/health": [],
+  "GET /api/me": [],
+  "GET /api/owners": [
+    "catalog:read"
+  ],
+  "GET /api/pql-analyses": [
+    "analysis:read"
+  ],
+  "GET /api/rules": [
+    "tag:manage"
+  ],
+  "GET /api/schemas/{}": [
+    "catalog:read"
+  ],
+  "GET /api/semantic-compilation/status": [
+    "chat:use"
+  ],
+  "GET /api/sources": [
+    "connection:read"
+  ],
+  "GET /api/sql-attributes": [
+    "catalog:read"
+  ],
+  "GET /api/sql-attributes/{}": [
+    "catalog:read"
+  ],
+  "GET /api/sql-attributes/{}/description-suggestion": [
+    "catalog:edit"
+  ],
+  "GET /api/tables/{}": [
+    "catalog:read"
+  ],
+  "GET /api/tags": [
+    "tag:read"
+  ],
+  "GET /api/tags/{}": [
+    "tag:manage"
+  ],
+  "GET /api/tags/{}/targets": [
+    "tag:manage"
+  ],
+  "GET /api/terms": [
+    "catalog:read"
+  ],
+  "GET /api/terms/{}": [
+    "catalog:read"
+  ],
+  "GET /api/terms/{}/column-attributes": [
+    "catalog:read"
+  ],
+  "GET /api/terms/{}/sql-attributes": [
+    "catalog:read"
+  ],
+  "PATCH /api/acronyms/{}": [
+    "acronym:update"
+  ],
+  "PATCH /api/conversations/{}": [
+    "conversation:write"
+  ],
+  "PATCH /api/custom-prompts/{}": [
+    "prompt:update"
+  ],
+  "PATCH /api/nodes/{}": [
+    "catalog:read"
+  ],
+  "PATCH /api/rules/{}": [
+    "tag:manage"
+  ],
+  "PATCH /api/sql-attributes/{}": [
+    "catalog:edit"
+  ],
+  "PATCH /api/tags/{}": [
+    "tag:manage"
+  ],
+  "PATCH /api/terms/{}": [
+    "catalog:read"
+  ],
+  "PATCH /api/terms/{}/column-attributes/{}": [
+    "catalog:edit"
+  ],
+  "POST /api/acronyms": [
+    "acronym:create"
+  ],
+  "POST /api/chat/cancel": [
+    "conversation:write"
+  ],
+  "POST /api/chat/completions": [
+    "chat:use"
+  ],
+  "POST /api/conversations": [
+    "conversation:write"
+  ],
+  "POST /api/conversations/{}/messages": [
+    "conversation:write"
+  ],
+  "POST /api/custom-analyses": [
+    "analysis:manage"
+  ],
+  "POST /api/custom-analyses/validate": [
+    "analysis:manage"
+  ],
+  "POST /api/custom-prompts": [
+    "prompt:create"
+  ],
+  "POST /api/model/export": [
+    "modelInterchange:export"
+  ],
+  "POST /api/model/import": [
+    "modelInterchange:import"
+  ],
+  "POST /api/pql-analyses": [
+    "analysis:manage"
+  ],
+  "POST /api/question-entity-coverage": [
+    "chat:use"
+  ],
+  "POST /api/rules": [
+    "tag:manage"
+  ],
+  "POST /api/search/global-search": [
+    "catalog:read"
+  ],
+  "POST /api/search/global-search/count": [
+    "catalog:read"
+  ],
+  "POST /api/semantic-compilation/reset": [
+    "semanticCompilation:manage"
+  ],
+  "POST /api/semantic-compilation/trigger": [
+    "semanticCompilation:manage"
+  ],
+  "POST /api/sources": [
+    "connection:manage"
+  ],
+  "POST /api/sql-attributes": [
+    "catalog:edit"
+  ],
+  "POST /api/sql-attributes/validate": [
+    "catalog:read"
+  ],
+  "POST /api/tags": [
+    "tag:manage"
+  ],
+  "POST /api/tags/{}/targets": [
+    "catalog:read"
+  ],
+  "PUT /api/configurations/distinct-value-probing": [
+    "semanticCompilation:manage"
+  ],
+  "PUT /api/configurations/pii-detection": [
+    "pii:manage"
+  ],
+  "PUT /api/configurations/semantic-compilation": [
+    "semanticCompilation:manage"
+  ],
+  "PUT /api/configurations/sql-query-timeout": [
+    "visualization:manage"
+  ],
+  "PUT /api/configurations/visualization": [
+    "visualization:manage"
+  ],
+  "PUT /api/custom-analyses/{}": [
+    "analysis:manage"
+  ],
+  "PUT /api/pql-analyses/{}": [
+    "analysis:manage"
+  ],
+  "PUT /api/sql-attributes/{}": [
+    "catalog:edit"
+  ]
+}

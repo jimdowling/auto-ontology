@@ -2,10 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'react-router';
 
 import { Button, SelectButton } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
@@ -21,6 +19,8 @@ import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
 import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { analyses } from '@/api/analyses';
+import { Permission } from '@/enums/auth';
+import { useMe } from '@/hooks/useMe';
 import { pqlAnalyses } from '@/api/pqlAnalyses';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { DEFAULT_PAGE_SIZE, useInfiniteList } from '@/hooks/useInfiniteList';
@@ -38,7 +38,7 @@ type AnalysisItem = {
 };
 
 const FIELD_INPUT_CLASSNAME =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-accent focus:ring-2 focus:ring-accent/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
 
 const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100';
 
@@ -61,7 +61,8 @@ const getLoadingSkeletonCount = () =>
 	);
 
 export const AnalysisView = () => {
-	const searchParams = useSearchParams();
+	const canManage = useMe().can(Permission.AnalysisManage);
+	const [searchParams] = useSearchParams();
 	const focusId = searchParams.get('focus');
 	const urlMode: AnalysisMode = searchParams.get('mode') === 'pql' ? 'pql' : 'sql';
 	const [tabOverride, setTabOverride] = useState<AnalysisMode | null>(null);
@@ -366,18 +367,20 @@ export const AnalysisView = () => {
 						PQL
 					</SelectButton>
 				</div>
-				<div className="ml-auto">
-					<Button
-						theme={ButtonTheme.Primary}
-						size={Size.REGULAR}
-						onClick={openCreateModal}
-						iconPosition="left"
-						shadow
-					>
-						<Icon name={IconName.Plus} className="h-4 w-4" />
-						Create New {MODE_LABEL[mode]} Analysis
-					</Button>
-				</div>
+				{canManage && (
+					<div className="ml-auto">
+						<Button
+							theme={ButtonTheme.Primary}
+							size={Size.REGULAR}
+							onClick={openCreateModal}
+							iconPosition="left"
+							shadow
+						>
+							<Icon name={IconName.Plus} className="h-4 w-4" />
+							Create New {MODE_LABEL[mode]} Analysis
+						</Button>
+					</div>
+				)}
 			</header>
 
 			<InfiniteScroll
@@ -452,7 +455,7 @@ export const AnalysisView = () => {
 								id={`analysis-${a.id}`}
 								className={`rounded-2xl border bg-white p-5 shadow-sm dark:bg-zinc-900 ${
 									a.id === focusId
-										? 'border-[#76b900] ring-2 ring-[#76b900]/30 dark:border-[#76b900]'
+										? 'border-accent ring-2 ring-accent/30 dark:border-accent'
 										: 'border-zinc-200 dark:border-zinc-800'
 								}`}
 							>
@@ -469,47 +472,49 @@ export const AnalysisView = () => {
 											fill
 										/>
 									</div>
-									<PopoverMenu
-										className="shrink-0"
-										items={[
-											{
-												label: 'Edit',
-												icon: (
+									{canManage && (
+										<PopoverMenu
+											className="shrink-0"
+											items={[
+												{
+													label: 'Edit',
+													icon: (
+														<Icon
+															name={IconName.Pencil}
+															className="h-3.5 w-3.5"
+														/>
+													),
+													onClick: () => openEditModal(a),
+												},
+												{
+													label: 'Delete',
+													icon: (
+														<Icon
+															name={IconName.Trash}
+															className="h-3.5 w-3.5"
+														/>
+													),
+													onClick: () => openDeleteModal(a),
+													danger: true,
+												},
+											]}
+											trigger={({ toggle }) => (
+												<Button
+													theme={ButtonTheme.IconNeutral}
+													size={Size.SMALL}
+													iconOnly
+													type="button"
+													onClick={toggle}
+													aria-label={`Actions for ${a.name}`}
+												>
 													<Icon
-														name={IconName.Pencil}
-														className="h-3.5 w-3.5"
+														name={IconName.DotsVertical}
+														className="h-4 w-4"
 													/>
-												),
-												onClick: () => openEditModal(a),
-											},
-											{
-												label: 'Delete',
-												icon: (
-													<Icon
-														name={IconName.Trash}
-														className="h-3.5 w-3.5"
-													/>
-												),
-												onClick: () => openDeleteModal(a),
-												danger: true,
-											},
-										]}
-										trigger={({ toggle }) => (
-											<Button
-												theme={ButtonTheme.IconNeutral}
-												size={Size.SMALL}
-												iconOnly
-												type="button"
-												onClick={toggle}
-												aria-label={`Actions for ${a.name}`}
-											>
-												<Icon
-													name={IconName.DotsVertical}
-													className="h-4 w-4"
-												/>
-											</Button>
-										)}
-									/>
+												</Button>
+											)}
+										/>
+									)}
 								</div>
 								{a.description.trim() !== '' && (
 									<div className="mt-2">

@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 /**
  * Telling whatever lists rules that a rule was written.
  *

@@ -2,12 +2,10 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { forwardRef, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
-import { Spinner } from '@nvidia/foundations-react-core';
+import { useNavigate } from 'react-router';
+import { Spinner } from '@/common/Spinner';
 import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import {
@@ -17,7 +15,6 @@ import {
 	type ComposerOwnerOption,
 	type ComposerOwnerSection,
 	type ComposerTagChip,
-	type ComposerZonesSection,
 	type ComposerCertification,
 } from '@/types/composer-section';
 import { CertificationStatus } from '@/enums/certification';
@@ -33,7 +30,6 @@ import { SqlBlock } from '@/common/SqlBlock';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
-import type { TermZone } from '@/types/terms';
 import { OwnerLabel } from '@/common/OwnerLabel';
 import { OwnersSelect } from '@/common/OwnersSelect';
 import { ownerChoices } from '@/lib/owners';
@@ -63,19 +59,6 @@ export const LabelList = ({ values }: { values: string[] }) => {
 		</ul>
 	);
 };
-
-export const ZonesRow = ({ zones }: { zones: TermZone[] }) => (
-	<div className="mt-2 flex flex-wrap items-center gap-1.5">
-		<span className="text-xs text-secondary">Zones:</span>
-		{zones.length > 0 ? (
-			zones.map((zone) => (
-				<Label key={zone.id} label={zone.name} color={zone.color} muted={!zone.enabled} />
-			))
-		) : (
-			<span className="text-xs text-secondary dark:text-zinc-400">-</span>
-		)}
-	</div>
-);
 
 export type ComposerPageHeader = {
 	/** Rendered as the page title. Every composed page names the entity it shows. */
@@ -158,8 +141,6 @@ function composerSectionHeading(section: ComposerSection): string {
 	switch (section.type) {
 		case ComposerSectionKind.LOADING_PANEL:
 			return section.message;
-		case ComposerSectionKind.ZONES_CHIPS:
-			return `${section.title} (${section.zones.length})`;
 		case ComposerSectionKind.RELATED_TERMS_CHIPS:
 			return `${section.title} (${section.terms.length})`;
 		case ComposerSectionKind.ENTITY_TAGS:
@@ -217,9 +198,9 @@ const DescriptionSuggestion = ({
 	if (!loading && suggestion == null && error == null) return null;
 
 	return (
-		<div className="mt-3 rounded-lg border border-[#76b900]/40 bg-[#76b900]/[0.06] p-4 dark:border-[#76b900]/30 dark:bg-[#76b900]/10">
+		<div className="mt-3 rounded-lg border border-accent/40 bg-accent/[0.06] p-4 dark:border-accent/30 dark:bg-accent/10">
 			<div className="flex items-center justify-between gap-3">
-				<h3 className="text-xs font-semibold uppercase tracking-wide text-[#4d7a00] dark:text-[#a3d63a]">
+				<h3 className="text-xs font-semibold uppercase tracking-wide text-accent-deep dark:text-accent-soft">
 					Description Suggestion
 				</h3>
 				{suggestion != null && (
@@ -235,14 +216,16 @@ const DescriptionSuggestion = ({
 			</div>
 			<div className="mt-2 text-sm leading-relaxed text-body dark:text-zinc-300">
 				{loading ? (
-					<span className="flex items-center gap-2 italic text-[#4d7a00]/70 dark:text-[#a3d63a]/70">
+					<span className="flex items-center gap-2 italic text-accent-deep/70 dark:text-accent-soft/70">
 						<Spinner aria-label="Generating suggestion" className="h-3.5 w-3.5" />
 						Generating suggestion…
 					</span>
 				) : suggestion != null ? (
 					suggestion
 				) : (
-					<span className="italic text-[#4d7a00]/70 dark:text-[#a3d63a]/70">{error}</span>
+					<span className="italic text-accent-deep/70 dark:text-accent-soft/70">
+						{error}
+					</span>
 				)}
 			</div>
 		</div>
@@ -284,7 +267,7 @@ const EditableTextCard = ({
 	};
 
 	return (
-		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
+		<div className="rounded-lg border border-accent/60 bg-white/90 p-5 ring-1 ring-accent/10 dark:bg-zinc-950/50">
 			<div className="flex items-start justify-between gap-3">
 				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
 					{section.title}
@@ -296,7 +279,7 @@ const EditableTextCard = ({
 				value={value}
 				onChange={handleChange}
 				rows={4}
-				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-body outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
+				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-body outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
 			/>
 			{section.suggestable === true && onSuggest != null && (
 				<DescriptionSuggestion onSuggest={onSuggest} onApply={handleApplySuggestion} />
@@ -343,7 +326,7 @@ const EditableTagListCard = ({
 	};
 
 	return (
-		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
+		<div className="rounded-lg border border-accent/60 bg-white/90 p-5 ring-1 ring-accent/10 dark:bg-zinc-950/50">
 			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
 				{section.title}
 			</h2>
@@ -437,7 +420,7 @@ const EditableEntityTagsCard = ({
 	const unassigned = section.options.filter((tag) => !assigned.has(tag.id));
 
 	return (
-		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
+		<div className="rounded-lg border border-accent/60 bg-white/90 p-5 ring-1 ring-accent/10 dark:bg-zinc-950/50">
 			<div className="flex items-center justify-between gap-3">
 				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
 					{section.title} ({tags.length})
@@ -533,7 +516,7 @@ const EditableOwnerCard = ({
 	const options = useLiveOwnerOptions(section);
 	const [ownerId, setOwnerId] = useState(section.ownerId ?? '');
 	return (
-		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
+		<div className="rounded-lg border border-accent/60 bg-white/90 p-5 ring-1 ring-accent/10 dark:bg-zinc-950/50">
 			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
 				{section.title}
 			</h2>
@@ -569,29 +552,6 @@ const EntityTagsSection = ({ section }: { section: ComposerEntityTagsSection }) 
 		)}
 	</div>
 );
-
-const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
-	const displayedZones = section.zones;
-
-	return (
-		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-				{section.title} ({displayedZones.length})
-			</h2>
-			{displayedZones.length === 0 ? (
-				<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
-			) : (
-				<ul className="mt-3 flex flex-wrap gap-2">
-					{displayedZones.map((zone) => (
-						<li key={zone.id}>
-							<Label label={zone.name} color={zone.color} muted={!zone.enabled} />
-						</li>
-					))}
-				</ul>
-			)}
-		</div>
-	);
-};
 
 function renderComposerSection(
 	section: ComposerSection,
@@ -795,14 +755,12 @@ function renderComposerSection(
 					className="flex min-h-[min(50dvh,420px)] flex-col items-center justify-center gap-4 rounded-lg border border-zinc-200/80 bg-white/70 px-8 py-12 dark:border-zinc-700/80 dark:bg-zinc-950/40"
 					role="status"
 				>
-					<Spinner aria-label="Loading" />
+					<Spinner aria-label="Loading" className="h-8 w-8" />
 					<p className="text-sm font-medium text-secondary dark:text-zinc-400">
 						{section.message}
 					</p>
 				</div>
 			);
-		case ComposerSectionKind.ZONES_CHIPS:
-			return <ZonesSection section={section} />;
 		case ComposerSectionKind.ENTITY_TAGS:
 			return <EntityTagsSection section={section} />;
 		case ComposerSectionKind.OWNER:
@@ -927,20 +885,20 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			hideEditToolbar = false,
 			headerActions,
 		} = props;
-		const router = useRouter();
+		const navigate = useNavigate();
 
 		const handleTermClick = useCallback(
 			(termId: string) => {
-				router.push(`/terms?focus=${encodeURIComponent(termId)}`);
+				navigate(`/terms?focus=${encodeURIComponent(termId)}`);
 			},
-			[router],
+			[navigate],
 		);
 
 		const handleEntityClick = useCallback(
 			(focusId: string) => {
-				router.push(catalogPathFromFocusId(focusId));
+				navigate(catalogPathFromFocusId(focusId));
 			},
-			[router],
+			[navigate],
 		);
 
 		const {
@@ -1208,7 +1166,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						onChange={(e) => {
 							pendingEditsRef.current.name = e.target.value;
 						}}
-						className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-heading outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+						className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-heading outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
 						aria-label="Name"
 					/>
 				) : (
@@ -1270,7 +1228,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								<EmptyState
 									illustration={
 										<div
-											className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
+											className="flex h-12 w-12 items-center justify-center rounded-lg bg-accent/15 text-xl"
 											aria-hidden
 										>
 											◇

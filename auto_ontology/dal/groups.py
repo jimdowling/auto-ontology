@@ -2,24 +2,24 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""User groups and the accounts that belong to them.
+"""User groups and their members.
 
-Accounts themselves stay in Prisma's ``frontend."user"`` table. This module
-reads that table and writes only ``user_group`` / ``user_group__member``,
-which Alembic owns. A membership stores the Better Auth id with no foreign
-key — see the comment on those tables in ``auto_ontology/dal/schema.py``.
+Accounts are Hopsworks project members, which this module does not read: a
+membership stores a Hopsworks username with no foreign key, and a member is
+shown by that stored id. Whether an id names a project member, and which
+project role it holds, is the caller's to ask Hopsworks.
 """
 
 from __future__ import annotations
 
 from typing import Any, NoReturn
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.ops import delete_returning, insert_returning
 from auto_ontology.dal.session import store, write_transaction
-from auto_ontology.infra.postgres import FRONTEND_SCHEMA
 
 _GROUP_COLUMNS = (
     s.user_group.c.id,
@@ -30,11 +30,6 @@ _GROUP_COLUMNS = (
     s.user_group.c.created,
 )
 
-_ACCOUNT_SQL = f"""
-SELECT id, name, email, role
-  FROM {FRONTEND_SCHEMA}."user"
-"""
-
 
 class GroupNameTaken(ValueError):
     """Another group already holds this name, case-insensitively."""
@@ -44,15 +39,6 @@ class GroupNameTaken(ValueError):
         super().__init__(f"Group with name {name!r} already exists")
 
 
-class UnknownGroupMembers(ValueError):
-    """One or more member ids are not accounts."""
-
-    def __init__(self, user_ids: list[str]) -> None:
-        self.user_ids = user_ids
-        listed = ", ".join(user_ids)
-        super().__init__(f"Unknown user id(s): {listed}")
-
-
 def _require_role(role: str) -> None:
     if role not in (s.GROUP_ROLE_ADMIN, s.GROUP_ROLE_VIEWER):
         raise ValueError(f"Role must be admin or viewer, got {role!r}")
@@ -60,38 +46,15 @@ def _require_role(role: str) -> None:
 
 def _name_taken(name: str, *, exclude_id: str | None = None) -> bool:
     statement = select(s.user_group.c.id).where(
-        func.lower(func.trim(s.user_group.c.name)) == name.strip().lower()
+        s.user_group.c.name_key == name.strip().lower()
     )
     if exclude_id is not None:
         statement = statement.where(s.user_group.c.id != exclude_id)
     return bool(store().query_read(statement))
 
 
-def _accounts_by_id(user_ids: list[str]) -> dict[str, dict[str, Any]]:
-    if not user_ids:
-        return {}
-    rows = store().query_read(
-        text(_ACCOUNT_SQL + " WHERE id = ANY(:user_ids)"),
-        {"user_ids": list(user_ids)},
-    )
-    return {row["id"]: dict(row) for row in rows}
-
-
-def _missing_user_ids(user_ids: list[str]) -> list[str]:
-    found = _accounts_by_id(user_ids)
-    return [user_id for user_id in user_ids if user_id not in found]
-
-
-def _user_view(account: dict[str, Any] | None, user_id: str) -> dict[str, Any]:
-    """An account as a group member, or the bare id when the account is gone."""
-    if account is None:
-        return {"id": user_id, "name": "", "email": "", "role": None}
-    return {
-        "id": account["id"],
-        "name": account["name"] or "",
-        "email": account["email"] or "",
-        "role": account["role"],
-    }
+def _user_view(user_id: str) -> dict[str, Any]:
+    return {"id": user_id, "name": user_id}
 
 
 def _attach_users(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -104,18 +67,14 @@ def _attach_users(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
             s.user_group__member.c.user_id,
         ).where(s.user_group__member.c.group_id.in_(group_ids))
     )
-    accounts = _accounts_by_id(list({row["user_id"] for row in member_rows}))
     members: dict[str, list[str]] = {}
     for row in member_rows:
         members.setdefault(row["group_id"], []).append(row["user_id"])
 
     attached: list[dict[str, Any]] = []
     for group in groups:
-        users = [
-            _user_view(accounts.get(user_id), user_id)
-            for user_id in members.get(group["id"], [])
-        ]
-        users.sort(key=lambda user: ((user["name"] or "").lower(), user["id"]))
+        users = [_user_view(user_id) for user_id in members.get(group["id"], [])]
+        users.sort(key=lambda user: (user["name"].lower(), user["id"]))
         attached.append(
             {
                 **group,
@@ -177,45 +136,25 @@ def get_group(group_id: str) -> dict[str, Any] | None:
 
 
 def groups_for_user(user_id: str) -> list[dict[str, Any]]:
-    """The groups *user_id* belongs to, ordered by name.
-
-    Does not check that the account exists. A deleted account can still have
-    memberships, and those are part of the answer.
-    """
+    """The groups *user_id* belongs to, ordered by name."""
     return _group_rows(user_id=user_id)
 
 
-def get_account(user_id: str) -> dict[str, Any] | None:
-    """One Better Auth account, or ``None`` when the id is unknown."""
-    rows = store().query_read(
-        text(_ACCOUNT_SQL + " WHERE id = :user_id"),
-        {"user_id": user_id},
-    )
-    if not rows:
-        return None
-    account = rows[0]
-    return _user_view(dict(account), account["id"])
-
-
 def list_users_and_groups() -> dict[str, Any]:
-    """Every account, and every group.
+    """Every group, and every id that is a member of one.
 
-    Each account carries the ids of the groups it belongs to, in group-name
-    order. A membership whose account has been deleted stays on the group and
-    does not appear in ``users``.
+    ``users`` holds only ids found in a membership, ordered by id, each with
+    the ids of its groups in group-name order. A project member in no group is
+    absent; the caller lists project members from Hopsworks.
     """
-    accounts = store().query_read(text(_ACCOUNT_SQL + " ORDER BY lower(name), id"))
     groups = list_groups()
     group_ids: dict[str, list[str]] = {}
     for group in groups:
         for user in group["users"]:
             group_ids.setdefault(user["id"], []).append(group["id"])
     users = [
-        {
-            **_user_view(dict(account), account["id"]),
-            "groups": group_ids.get(account["id"], []),
-        }
-        for account in accounts
+        {**_user_view(user_id), "groups": group_ids[user_id]}
+        for user_id in sorted(group_ids, key=lambda user_id: (user_id.lower(), user_id))
     ]
     return {"users": users, "groups": groups}
 
@@ -230,31 +169,27 @@ def create_group(
 ) -> dict[str, Any]:
     """Create a group and its membership, and return the group.
 
-    *name* is stored as given; the caller trims it. Raises
-    :class:`GroupNameTaken` when the name is already held, and
-    :class:`UnknownGroupMembers` when a member id is not an account.
+    *name* is stored as given; the caller trims it. *user_ids* are stored
+    unchecked. Raises :class:`GroupNameTaken` when the name is already held.
     """
     _require_role(role)
     if _name_taken(name):
         raise GroupNameTaken(name)
-    missing = _missing_user_ids(user_ids)
-    if missing:
-        raise UnknownGroupMembers(missing)
 
     try:
         with write_transaction():
-            rows = store().query_write(
-                s.user_group.insert()
-                .values(
-                    name=name,
-                    description=description,
-                    color=color,
-                    role=role,
-                )
-                .returning(s.user_group.c.id)
+            rows = insert_returning(
+                s.user_group,
+                {
+                    "name": name,
+                    "description": description,
+                    "color": color,
+                    "role": role,
+                },
+                [s.user_group.c.id],
             )
-            _insert_members(rows[0]["id"], user_ids)
             group_id = rows[0]["id"]
+            _insert_members(group_id, user_ids)
     except IntegrityError as exc:
         _raise_name_taken(exc, name)
 
@@ -279,16 +214,11 @@ def update_group(
     back as ``None`` instead of a foreign-key error, and two membership
     replacements of the same group run one after the other.
 
-    Raises :class:`GroupNameTaken` and :class:`UnknownGroupMembers` for the
-    same reasons as :func:`create_group`. A group's own name is not a
-    collision.
+    Raises :class:`GroupNameTaken` as :func:`create_group` does. A group's own
+    name is not a collision.
     """
     if "role" in updates:
         _require_role(updates["role"])
-    if user_ids is not None:
-        missing = _missing_user_ids(user_ids)
-        if missing:
-            raise UnknownGroupMembers(missing)
 
     try:
         with write_transaction():
@@ -319,9 +249,8 @@ def update_group(
 
 def delete_group(group_id: str) -> bool:
     """Delete one group. Membership goes with it. ``False`` when it is absent."""
-    rows = store().query_write(
-        s.user_group.delete()
-        .where(s.user_group.c.id == group_id)
-        .returning(s.user_group.c.id)
+    return bool(
+        delete_returning(
+            s.user_group, s.user_group.c.id == group_id, [s.user_group.c.id]
+        )
     )
-    return bool(rows)

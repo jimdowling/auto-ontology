@@ -2,8 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-'use client';
-
 import { useEffect, useRef } from 'react';
 import { UndirectedGraph } from 'graphology';
 import Sigma from 'sigma';
@@ -147,7 +145,7 @@ const HOVER_LABEL_BACKGROUND_DARK = '#18181b';
 const prefersDarkMode = () =>
 	typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-const EDGE_BRAND_COLOR = '#76b900';
+const EDGE_BRAND_COLOR = '#1eb182';
 
 const hexToRgb = (hex: string) => {
 	const value = hex.replace('#', '');

@@ -173,8 +173,11 @@ def authorize(request: Request) -> None:
     if route is None or not request.url.path.startswith("/api/"):
         return
     caller = current_caller(request)
+    # FastAPI 0.141 keeps an included router's routes unflattened, so the matched
+    # route's path lacks the router's "/api" prefix; every router is included under it.
+    template = route.path if route.path.startswith("/api/") else f"/api{route.path}"
     required = route_permissions().get(
-        f"{request.method} {_PARAMETER.sub('{}', route.path)}"
+        f"{request.method} {_PARAMETER.sub('{}', template)}"
     )
     if required is None:
         if caller.role != "admin":

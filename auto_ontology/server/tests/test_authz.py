@@ -11,7 +11,7 @@ import hmac
 import time
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from auto_ontology.hopsworks import identity
@@ -62,19 +62,23 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     def health() -> dict:
         return {"status": "ok"}
 
-    @app.get("/api/terms")
+    # As create_app does: FastAPI 0.141 keeps an included router unflattened, so the
+    # matched route carries "/terms", not "/api/terms".
+    api = APIRouter()
+
+    @api.get("/terms")
     def terms() -> list:
         return []
 
-    @app.post("/api/chat/completions")
+    @api.post("/chat/completions")
     def chat() -> dict:
         return {"answer": "42"}
 
-    @app.get("/api/columns/{table_id}")
+    @api.get("/columns/{table_id}")
     def columns(table_id: str) -> dict:
         return {"data": [{"name": "email", "sample_values": '["a@b"]'}]}
 
-    @app.get("/api/tags")
+    @api.get("/tags")
     def tags() -> dict:
         return {
             "data": [
@@ -83,10 +87,11 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
             ]
         }
 
-    @app.post("/api/semantic-compilation/trigger")
+    @api.post("/semantic-compilation/trigger")
     def unlisted() -> dict:
         return {"status": "accepted"}
 
+    app.include_router(api, prefix="/api")
     return TestClient(app)
 
 

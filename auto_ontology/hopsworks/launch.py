@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import multiprocessing
 import os
 import sys
 from importlib import import_module
@@ -100,8 +101,17 @@ def app_handle() -> Any:
     return _app_handle
 
 
+def _in_spawned_child() -> bool:
+    # A spawned process (the chat worker) re-runs the launcher file that called app()
+    # or job() before it runs its own target; there, starting a second server or job
+    # would fail on the port or rerun the step instead of answering the question.
+    return multiprocessing.parent_process() is not None
+
+
 def app() -> None:
-    """Run the ontology app (API and UI) on ``APP_PORT``."""
+    """Run the ontology app (API and UI) on ``APP_PORT``. Does nothing in a spawned child process."""
+    if _in_spawned_child():
+        return
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
@@ -112,7 +122,10 @@ def app() -> None:
 
 
 def job(step: str) -> None:
-    """Run one pipeline step (``ingest``, ``compile``, ``embed``, ``reset``, ``import``)."""
+    """Run one pipeline step (``ingest``, ``compile``, ``embed``, ``reset``, ``import``).
+    Does nothing in a spawned child process."""
+    if _in_spawned_child():
+        return
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )

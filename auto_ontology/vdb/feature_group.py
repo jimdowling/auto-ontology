@@ -34,6 +34,7 @@ import math
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+import numpy as np
 from sqlalchemy import select, text
 
 from auto_ontology.dal import ops
@@ -187,7 +188,9 @@ class FeatureGroupVDB:
             row["is_unique"] = None if unique is None else bool(unique)
             row["document_type"] = record.get("document_type")
             row["metadata"] = json.dumps(metadata, default=str)
-            row["embedding"] = [float(v) for v in embedding]
+            # float32: hsfs reads a list of Python floats as array<double>, which the
+            # array<float> feature refuses.
+            row["embedding"] = np.asarray(embedding, dtype=np.float32)
             rows.append(row)
         return rows
 
@@ -374,12 +377,13 @@ class FeatureGroupVDB:
             for _score, values in hits:
                 row = dict(zip(names, values, strict=False))
                 metadata = json.loads(row.get("metadata") or "{}")
+                stored = row.get("embedding")
                 converted.append(
                     {
                         "text": row.get("text"),
                         "metadata": metadata,
                         "_distance": _cosine_distance(
-                            query, row.get("embedding") or ()
+                            query, () if stored is None else stored
                         ),
                     }
                 )

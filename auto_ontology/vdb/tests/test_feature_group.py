@@ -173,3 +173,12 @@ def test_a_failed_ingestion_is_not_recorded(vdb: FeatureGroupVDB) -> None:
 def test_a_wrong_dimension_is_refused(vdb: FeatureGroupVDB) -> None:
     with pytest.raises(ValueError, match="dimensions"):
         vdb.run([[_record("a", "Customer", [1.0, 0.0, 0.0])]])
+
+
+def test_vectors_are_written_as_float32(vdb: FeatureGroupVDB) -> None:
+    # hsfs infers array<double> from Python floats, which the array<float>
+    # embedding feature refuses; float32 arrays infer array<float>.
+    vdb.run([[_record("a", "Customer", [1.0, 0.0])]])
+    stored = vdb.fake.rows["a"]["embedding"]  # type: ignore[attr-defined]
+    assert str(stored.dtype) == "float32"
+    assert stored.tolist() == [1.0, 0.0]

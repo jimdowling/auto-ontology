@@ -98,3 +98,21 @@ def test_the_table_regex_becomes_an_allow_filter() -> None:
         "table_allow_regex": "^fact_"
     }
     assert table_filter_settings({"table_regex": None}) == {}
+
+
+def test_a_data_source_the_project_lacks_is_named_in_the_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from auto_ontology.connectors import hopsworks
+    from auto_ontology.hopsworks import client, config
+
+    # hsfs answers an unknown name with a DataSource that has no connector.
+    store = SimpleNamespace(
+        get_data_source=lambda name: SimpleNamespace(storage_connector=None)
+    )
+    monkeypatch.setattr(client, "feature_store", lambda name=None: store)
+    monkeypatch.setattr(config, "load", lambda: SimpleNamespace(feature_store=None))
+    with pytest.raises(UnsupportedSourceError, match="'sales_mysql' does not exist"):
+        hopsworks.load_data_source("sales_mysql")

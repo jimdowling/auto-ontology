@@ -100,10 +100,20 @@ def connection_for(data_source: Any) -> dict[str, Any]:
 
 
 def load_data_source(name: str) -> Any:
+    """The project's data source ``name``. Raises :class:`UnsupportedSourceError`
+    when there is none by that name."""
     from auto_ontology.hopsworks.client import feature_store
     from auto_ontology.hopsworks.config import load
 
-    return feature_store(load().feature_store).get_storage_connector(name)
+    # hsfs answers a missing name with an empty DataSource, not a 404.
+    connector = (
+        feature_store(load().feature_store).get_data_source(name).storage_connector
+    )
+    if connector is None:
+        raise UnsupportedSourceError(
+            f"data source {name!r} does not exist in this project"
+        )
+    return connector
 
 
 def connection_string(source: dict[str, Any]) -> str:

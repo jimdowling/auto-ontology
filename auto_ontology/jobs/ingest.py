@@ -75,10 +75,11 @@ def main(argv: list[str]) -> int:
     with pipeline_lease():
         config = load()
         seed_from_config(config)
-        seeded = seed_sources(config)
+        seeded, rejected = seed_sources(config)
         if seeded:
             logger.info("Added the sources from ontology.yaml: %s", ", ".join(seeded))
         succeeded, failed = ingest_sources(args.source)
+        failed += len(rejected)
         if succeeded:
             replay_rules("ingest")
     logger.info("Ingest finished: %d source(s) succeeded, %d failed", succeeded, failed)

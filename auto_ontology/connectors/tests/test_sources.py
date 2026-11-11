@@ -84,8 +84,8 @@ def test_ontology_yaml_seeds_only_an_empty_store() -> None:
             Source(name="missing", schemas=(), table_regex=None),
         )
     )
-    assert sources.seed_sources(config) == ["sales_mysql"]
+    assert sources.seed_sources(config) == (["sales_mysql"], ["missing"])
     sources.remove_source("sales_mysql")
     sources.add_source("crm_pg")
-    assert sources.seed_sources(config) == []
+    assert sources.seed_sources(config) == ([], [])
     assert [source["name"] for source in sources.list_sources()] == ["crm_pg"]

@@ -94,17 +94,19 @@ def remove_source(name: str) -> str | None:
     return source["database_name"]
 
 
-def seed_sources(config: OntologyConfig) -> list[str]:
+def seed_sources(config: OntologyConfig) -> tuple[list[str], list[str]]:
     """Store ``ontology.yaml``'s sources when the store has none; returns the
-    names stored. A source that cannot be added is logged and skipped."""
+    names stored and the names that could not be added, each logged."""
     if connections.list_connections():
-        return []
+        return [], []
     added: list[str] = []
+    rejected: list[str] = []
     for source in config.sources:
         try:
             add_source(source.name, list(source.schemas), source.table_regex)
         except Exception:
             logger.exception("Could not add source %r from ontology.yaml", source.name)
+            rejected.append(source.name)
             continue
         added.append(source.name)
-    return added
+    return added, rejected

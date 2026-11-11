@@ -56,3 +56,20 @@ def test_one_source_can_be_ingested_alone(ingested: list[str]) -> None:
 def test_an_unknown_source_is_an_error(ingested: list[str]) -> None:
     with pytest.raises(ValueError, match="no source"):
         ingest.ingest_sources("nope")
+
+
+def test_a_source_ontology_yaml_names_but_cannot_add_fails_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import contextlib
+
+    from auto_ontology.connectors import sources
+    from auto_ontology.hopsworks import config
+    from auto_ontology.infra import feature_flags
+
+    monkeypatch.setattr(ingest, "pipeline_lease", contextlib.nullcontext)
+    monkeypatch.setattr(config, "load", lambda: SimpleNamespace(sources=()))
+    monkeypatch.setattr(feature_flags, "seed_from_config", lambda config: None)
+    monkeypatch.setattr(sources, "seed_sources", lambda config: ([], ["sales_mysql"]))
+    monkeypatch.setattr(ingest, "ingest_sources", lambda only=None: (0, 0))
+    assert ingest.main([]) == 1

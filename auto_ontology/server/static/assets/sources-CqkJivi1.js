@@ -1,0 +1,1 @@
+import{c as e}from"./Button-CGsI-mNA.js";var t={list:()=>e.get(`sources`),add:t=>e.post(`sources`,t),remove:t=>e.delete(`sources/${encodeURIComponent(t)}`)};export{t};

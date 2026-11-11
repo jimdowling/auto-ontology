@@ -53,7 +53,7 @@ EXEMPT_NAMES = {
     ".python-version",
     "next-env.d.ts",
 }
-EXEMPT_PREFIXES = ("vendor/",)
+EXEMPT_PREFIXES = ("vendor/", "auto_ontology/server/static/")
 
 
 def _tracked_files() -> list[str]:

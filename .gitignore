@@ -10,9 +10,6 @@
 dist/
 *.egg-info/
 
-# The web UI, built by `pnpm build` in frontend/ and served by the FastAPI app
-auto_ontology/server/static/
-
 
 # dependencies
 node_modules

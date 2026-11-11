@@ -11,6 +11,7 @@ on:
     branches: [main]
     paths:
       - 'frontend/**'
+      - 'auto_ontology/server/static/**'
 
 defaults:
   run:
@@ -64,6 +65,13 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # Hopsworks installs the package from git, so the UI it serves is the committed build.
+      - name: Committed UI build is current
+        run: |
+          git status --porcelain -- ../auto_ontology/server/static
+          test -z "$(git status --porcelain -- ../auto_ontology/server/static)" \
+            || { echo "Run pnpm build in frontend/ and commit auto_ontology/server/static" >&2; exit 1; }
 
       - name: Typecheck and test
         run: pnpm typecheck && pnpm test

@@ -2,8 +2,8 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# The image is built by Hopsworks docker-images (base-image/ontology-pipeline);
-# these targets cover local development only.
+# Hopsworks installs this package from git into a clone of the
+# python-feature-pipeline environment; these targets cover local development only.
 
 NDB := docker compose -f dev_tools/ndb/docker-compose.yml
 PG := postgresql://auto_ontology:auto_ontology@127.0.0.1:55432

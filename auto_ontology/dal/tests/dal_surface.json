@@ -209,6 +209,7 @@
     "list_acronyms": "(*, newest_first: 'bool' = False) -> 'list[dict[str, Any]]'",
     "list_analytics": "(since: 'Any', skip: 'int', limit: 'int | None') -> 'tuple[list[dict[str, Any]], int]'",
     "list_prompts": "() -> 'list[dict[str, Any]]'",
+    "seed_configuration": "(key: 'str', value: 'str') -> 'bool'",
     "set_configuration": "(key: 'str', value: 'str') -> 'None'",
     "update_acronym": "(acronym_id: 'str', **values: 'Any') -> 'dict[str, Any] | None'",
     "update_prompt": "(prompt_id: 'str', content: 'str') -> 'dict[str, Any] | None'"
